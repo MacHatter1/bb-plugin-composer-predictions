@@ -6,6 +6,17 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+## 0.4.1 - 2026-10-16
+
+### Fixed
+
+- The plugin no longer fails to load when startup recovery cannot list or
+  read its left-over helper threads. It logs a warning, cleans up the helpers
+  it could read, and finds the rest on the next start.
+- A helper that cannot be stopped after asking for approval or input no longer
+  raises an event handler error. The failure is logged, and the prediction
+  still ends in an error.
+
 ## 0.4.0 - 2026-10-16
 
 ### Added
