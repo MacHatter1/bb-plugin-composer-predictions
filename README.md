@@ -16,9 +16,16 @@ Press Tab to make it an editable draft. Nothing is ever sent for you.
 
 [Features](#features) · [Install](#install) · [How it works](#how-it-works) · [Safety](#safety-and-cost) · [CLI](#cli) · [Settings](#settings) · [Development](#development) · [Design notes](docs/DESIGN.md)
 
+<br>
+
+<img src="docs/screenshots/ghost-text.png" alt="A suggested next message shown as faint ghost text, with a Tab hint, in the empty message box after an agent reply" width="900">
+
 </div>
 
 <br>
+
+> [!NOTE]
+> The screenshots are real BB captures of a demo thread in a throwaway project.
 
 ## The problem
 
@@ -101,6 +108,15 @@ one is available.
 </td>
 </tr>
 </table>
+
+<div align="center">
+<table>
+<tr>
+<td align="center"><img src="docs/screenshots/draft.png" alt="After Tab, the suggestion is an ordinary draft in the message box and the send button is active" width="440"><br><sub><b>One Tab later: an editable draft, not sent</b></sub></td>
+<td align="center"><img src="docs/screenshots/settings.png" alt="Composer Predictions settings: the on/off switch, the conversation budget and the Prediction model picker" width="440"><br><sub><b>Settings, with a separate prediction model</b></sub></td>
+</tr>
+</table>
+</div>
 
 ## Install
 

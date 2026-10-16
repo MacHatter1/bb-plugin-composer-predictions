@@ -16,6 +16,7 @@ project uses [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - Design notes and per-release review records moved to `docs/`.
+- README screenshots of the ghost text, the inserted draft and the settings.
 - The README and store listing now state that every reply in a watched thread
   costs one request, and that a separate prediction model's provider receives
   the conversation, including tool output.
