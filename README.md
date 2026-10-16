@@ -142,24 +142,24 @@ bb plugin install path:$PWD --yes
 sequenceDiagram
     autonumber
     participant You
-    participant Box as Message box
+    participant Composer as Message box
     participant Plugin as Composer Predictions
     participant Helper as Hidden helper thread
 
-    Note over Box: the agent's reply ends,<br/>the box is empty
-    Box->>Plugin: ask for a prediction
+    Note over Composer: the agent's reply ends,<br/>the box is empty
+    Composer->>Plugin: ask for a prediction
     Plugin->>Plugin: rebuild the recent conversation<br/>and fingerprint it
     alt a saved result matches
-        Plugin-->>Box: saved suggestion
+        Plugin-->>Composer: saved suggestion
     else new context
         Plugin->>Helper: one prediction request
         Helper-->>Plugin: {"suggestion": "…"} or null
         Plugin->>Helper: archive and stop
-        Plugin-->>Box: suggestion
+        Plugin-->>Composer: suggestion
     end
-    Box-->>You: ghost text and a Tab hint
-    You->>Box: Tab
-    Box->>Box: fill the empty draft, never send
+    Composer-->>You: ghost text and a Tab hint
+    You->>Composer: Tab
+    Composer->>Composer: fill the empty draft, never send
 ```
 
 - **One hidden request.** Each prediction runs in a hidden helper thread in
