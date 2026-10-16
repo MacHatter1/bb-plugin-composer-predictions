@@ -188,9 +188,17 @@ Context limits, cache rules, key handling and compatibility are covered in
 - 🧵 **Leaves your thread alone.** Predictions run in separate hidden helpers,
   never in your conversation. Helpers left behind by a crash are cleaned up on
   the next start.
-- 💸 **Costs a model request per new context.** Normal provider usage applies.
-  Only threads whose message box asked are watched, at most two helpers run at
-  once, and a saved result for an unchanged conversation is reused.
+- 💸 **Costs a model request per new reply.** Normal provider usage applies. A
+  thread is watched from the first time you open it with an empty message box
+  until it is archived or deleted, or the plugin restarts. Each later reply
+  there costs one request, even when you are not looking at that thread. At
+  most two helpers run at once, and a saved result for an unchanged
+  conversation is reused.
+- 📤 **Sends your conversation to the prediction model.** Each request carries
+  up to the conversation budget (48,000 characters by default) of recent
+  messages and tool output. With the default model, that is the provider the
+  conversation already uses. If you choose a separate model, its provider
+  receives it too.
 - 🗄️ **Stores no copy of your conversation.** The plugin's database keeps the
   suggestion, its status and a fingerprint. BB itself keeps each helper's
   history, including the quoted conversation, as an archived hidden thread.

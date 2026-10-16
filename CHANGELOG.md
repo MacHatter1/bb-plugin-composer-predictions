@@ -6,6 +6,8 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+## 0.4.0 - 2026-10-16
+
 ### Added
 
 - A bundled agent skill for `bb composer-predictions`, offered to ordinary
@@ -14,6 +16,9 @@ project uses [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - Design notes and per-release review records moved to `docs/`.
+- The README and store listing now state that every reply in a watched thread
+  costs one request, and that a separate prediction model's provider receives
+  the conversation, including tool output.
 
 ## 0.3.1 - 2026-10-16
 

@@ -27,9 +27,13 @@ Tab only fills an empty draft through BB's public composer API, and the plugin
 never submits a message. Each prediction is one request in a hidden helper
 thread, never in your conversation, archived and stopped as soon as it
 finishes, fails or reaches its 60-second timeout. Normal provider usage
-applies. Only threads whose message box asked are watched, at most two helpers
-run at once, and an unchanged conversation reuses its saved result.
+applies. Once you open a thread with an empty message box, each later reply
+there costs one request, even when you are not looking at it, until the thread
+is archived or deleted or the plugin restarts. At most two helpers run at
+once, and an unchanged conversation reuses its saved result.
 
+Each request carries up to 48,000 characters of recent messages and tool
+output by default. A separate prediction model's provider receives that too.
 The plugin's database stores the suggestion, its status and a fingerprint,
 not your conversation. BB keeps each helper's history as an archived hidden
 thread. The helper is told not to use tools and runs in `auto` permission

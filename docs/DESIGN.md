@@ -7,7 +7,11 @@ step. The [README](../README.md) is the short version.
 
 The composer bridge asks for a prediction (`ensure`) when a thread's composer
 is empty and the thread is not running. Only threads whose composer has asked
-are watched; at most 1,000 are tracked at once.
+are watched; at most 1,000 are tracked at once. The watch list is held in
+memory and is not shortened when a composer closes. A thread leaves it when it
+is archived or deleted, when the cap evicts it, or when the plugin restarts.
+Until then, every reply in that thread starts a prediction, whether or not its
+composer is on screen, so the suggestion is ready on your return.
 
 A thread qualifies when it is idle and visible, not archived or deleted, with
 no queued messages and no active background agents. Its conversation must end
@@ -26,7 +30,9 @@ By default, generation uses the source thread's provider and its last
 execution model, at the first of `low`, `none` or `medium` that the model
 supports, or else the model's default effort. A saved prediction model
 overrides the provider, model, reasoning effort and service tier. If the saved
-effort is not offered by the model, the model's default effort is used.
+effort is not offered by the model, the model's default effort is used. A
+separate model's provider receives the same reconstructed conversation,
+including tool output, that the conversation's own provider would.
 
 The chosen provider must support BB's `auto` permission mode, and the model
 must be available on the source conversation's machine, including for SSH
