@@ -104,16 +104,24 @@ one is available.
 
 ## Install
 
-The repository is not published yet. Install from a local copy:
+```sh
+bb plugin install git:https://github.com/MacHatter1/bb-plugin-composer-predictions --yes
+```
+
+Predictions start right away. After the next reply, leave the message box
+empty for a few seconds.
+
+<details>
+<summary><b>Install from a local clone</b></summary>
 
 ```sh
+git clone https://github.com/MacHatter1/bb-plugin-composer-predictions
 cd bb-plugin-composer-predictions
 npm install && bb plugin build
 bb plugin install path:$PWD --yes
 ```
 
-Predictions start right away. After the next reply, leave the message box
-empty for a few seconds.
+</details>
 
 **Requirements**
 
