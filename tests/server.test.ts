@@ -67,6 +67,51 @@ test("startup recovers only this plugin's marked hidden helper threads", async (
     assert.deepEqual(harness.inspection.sdk.callsTo("threads.stop"), [[{ threadId: "worker" }]]);
   } finally { await harness.lifecycle.dispose(); }
 });
+const warned = (harness: ReturnType<typeof fixture>["harness"], text: string) =>
+  harness.inspection.logEntries.some(entry => entry.level === "warn" && entry.message.includes(text));
+test("the plugin still loads and predicts when startup recovery cannot list threads", async () => {
+  const { bb, harness } = fixture();
+  harness.sdk.stub("threads.list", async () => { throw new Error("threads unavailable"); });
+  try {
+    await plugin(bb);
+    assert.ok(warned(harness, "threads unavailable"));
+    await harness.behavior.callRpc("ensure", { threadId: "source" });
+    assert.equal((await untilSettled(harness)).status, "ready");
+  } finally { await harness.lifecycle.dispose(); }
+});
+test("one unreadable helper does not stop startup recovering the others", async () => {
+  const { bb, harness } = fixture();
+  harness.sdk.stub("threads.list", async () => [worker, { ...worker, id: "worker-2" }]);
+  harness.sdk.stub("threads.getPluginMetadata", async ({ threadId }) => {
+    if (threadId === "worker") throw new Error("metadata unavailable");
+    return { predictionWorker: true };
+  });
+  try {
+    await plugin(bb);
+    assert.ok(warned(harness, "metadata unavailable"));
+    assert.deepEqual(harness.inspection.sdk.callsTo("threads.archive"), [[{ threadId: "worker-2" }]]);
+    assert.deepEqual(harness.inspection.sdk.callsTo("threads.stop"), [[{ threadId: "worker-2" }]]);
+  } finally { await harness.lifecycle.dispose(); }
+});
+test("a helper that cannot be stopped after asking for input is logged, not thrown, and still fails closed", async () => {
+  const { bb, harness } = fixture();
+  const running = { ...worker, status: "active" as const };
+  harness.sdk.stub("threads.get", async ({ threadId }) => threadId === "source" ? source : running);
+  harness.sdk.stub("threads.stop", async () => { throw new Error("already stopped"); });
+  try {
+    await plugin(bb);
+    await harness.behavior.callRpc("ensure", { threadId: "source" });
+    // Wait until the generation is polling its running helper.
+    const polling = () => harness.inspection.sdk.callsTo("threads.get").some(([args]) => (args as { threadId: string }).threadId === "worker");
+    for (let count = 0; count < 50 && !polling(); count++) await new Promise(resolve => setImmediate(resolve));
+    await new Promise(resolve => setImmediate(resolve));
+    const { errors } = await harness.behavior.emitThreadEvent("interaction.pending", { thread: running, interaction: { id: "permission" } as never });
+    assert.deepEqual(errors, []);
+    assert.ok(warned(harness, "already stopped"));
+    assert.equal((await untilSettled(harness)).status, "error");
+    assert.deepEqual(harness.inspection.sdk.callsTo("threads.archive"), [[{ threadId: "worker" }]]);
+  } finally { await harness.lifecycle.dispose(); }
+});
 test("ordinary threads get the bundled skill; marked helpers get no skills, only worker instructions", async () => {
   const { bb, harness } = fixture();
   try {

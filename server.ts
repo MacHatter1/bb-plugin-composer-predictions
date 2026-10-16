@@ -189,7 +189,9 @@ export default async function plugin(bb: BbPluginApi) {
   bb.events.on("interaction.pending", async ({ thread }) => {
     if (workers.has(thread.id)) {
       rejectedWorkers.add(thread.id); wakeups.get(thread.id)?.();
-      await bb.sdk.threads.stop({ threadId: thread.id });
+      // The generation's own cleanup stops the helper again, so a failure here only needs logging.
+      try { await bb.sdk.threads.stop({ threadId: thread.id }); }
+      catch (error) { bb.log.warn(`Prediction helper stop: ${String(error)}`); }
     } else if (interested.has(thread.id)) coordinator.clear(thread.id);
   });
   bb.rpc.register(rpcContract, {
@@ -216,15 +218,20 @@ export default async function plugin(bb: BbPluginApi) {
   bb.onDispose(async () => { await coordinator.dispose(); await Promise.allSettled([...workers].map(cleanupWorker)); });
   // Lifecycle events are not replayed after a process crash. Reconcile only
   // this plugin's marked, hidden, unarchived workers before accepting work.
+  // A failed lookup skips recovery for now; it must not stop the plugin loading.
   const abandoned: string[] = [];
-  for (let offset = 0; ; offset += 100) {
-    const rows = await bb.sdk.threads.list({ originPluginId: bb.pluginId, includeHidden: true, archived: false, limit: 100, offset });
-    for (const row of rows) {
-      if (row.originPluginId !== bb.pluginId || row.title !== WORKER_TITLE || row.visibility !== "hidden" || row.archivedAt || row.deletedAt) continue;
-      const metadata = await bb.sdk.threads.getPluginMetadata({ threadId: row.id, pluginId: bb.pluginId });
-      if (metadata?.predictionWorker === true) abandoned.push(row.id);
+  try {
+    for (let offset = 0; ; offset += 100) {
+      const rows = await bb.sdk.threads.list({ originPluginId: bb.pluginId, includeHidden: true, archived: false, limit: 100, offset });
+      for (const row of rows) {
+        if (row.originPluginId !== bb.pluginId || row.title !== WORKER_TITLE || row.visibility !== "hidden" || row.archivedAt || row.deletedAt) continue;
+        try {
+          const metadata = await bb.sdk.threads.getPluginMetadata({ threadId: row.id, pluginId: bb.pluginId });
+          if (metadata?.predictionWorker === true) abandoned.push(row.id);
+        } catch (error) { bb.log.warn(`Prediction helper recovery skipped ${row.id}: ${String(error)}`); }
+      }
+      if (rows.length < 100) break;
     }
-    if (rows.length < 100) break;
-  }
+  } catch (error) { bb.log.warn(`Prediction helper recovery: ${String(error)}`); }
   for (const threadId of abandoned) { workers.add(threadId); await cleanupWorker(threadId); }
 }

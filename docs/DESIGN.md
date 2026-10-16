@@ -45,7 +45,11 @@ prediction request. It does not continue the source conversation or submit a
 message there. Helpers are archived and stopped after completion,
 cancellation, failure, or a 60-second timeout. On startup, the plugin finds
 its own marked, hidden, unarchived helpers left by an interrupted server
-process and cleans them up. Normal provider usage and billing apply.
+process and cleans them up. If that lookup fails, it logs a warning, cleans up
+the helpers it could read, and loads anyway; the rest are found on the next
+start. A failed stop after a helper asks for approval or input is also only
+logged, because the helper's own cleanup stops it again. Normal provider usage
+and billing apply.
 
 The prediction instruction in `lib/prediction.ts` reproduces the
 composer-predictions remote config v5 inspected on 16 October 2026. A
