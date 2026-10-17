@@ -25,9 +25,10 @@ you can edit. Nothing is ever sent for you.
 
 Tab only fills an empty draft through BB's public composer API, and the plugin
 never submits a message. Each prediction is one request in a hidden helper
-thread, never in your conversation, archived and stopped as soon as it
-finishes, fails or reaches its 60-second timeout. Normal provider usage
-applies. Once you open a thread with an empty message box, each later reply
+thread, never in your conversation, stopped and then archived as soon as its
+answer is used or the conversation moves on. Providers that support archive
+get that chat archived too. Normal provider usage applies. Once you open a
+thread with an empty message box, each later reply
 there costs one request, even when you are not looking at it, until the thread
 is archived or deleted or the plugin restarts. At most two helpers run at
 once, and an unchanged conversation reuses its saved result.

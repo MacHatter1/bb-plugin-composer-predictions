@@ -8,6 +8,7 @@ import type { ModelSettings, PredictionState } from "../contract.ts";
 const source = makeThreadResponse({ id: "source", providerId: "codex", environmentId: "environment" });
 const worker = makeThreadResponse({ id: "worker", visibility: "hidden", title: "Composer prediction helper", originPluginId: "composer-predictions" });
 function fixture(options: { pendingInteraction?: boolean; abandoned?: boolean } = {}) {
+  const operations: string[] = [];
   const host = createFakePluginHost({ pluginId: "composer-predictions", sdk: {
     threads: {
       get: async ({ threadId }) => threadId === "source" ? source : worker,
@@ -21,12 +22,13 @@ function fixture(options: { pendingInteraction?: boolean; abandoned?: boolean } 
       spawn: async () => worker,
       output: async () => ({ output: '{"suggestion":"Show me the diff"}' }),
       interactions: { list: async () => options.pendingInteraction ? [{ id: "permission" }] : [] },
-      archive: async () => ({ ok: true }), stop: async () => ({ ok: true }),
+      archive: async ({ threadId }) => { operations.push(`archive:${threadId}`); return { ok: true }; },
+      stop: async ({ threadId }) => { operations.push(`stop:${threadId}`); return { ok: true }; },
     },
     providers: { models: async () => ({ providers: [{ id: "codex", capabilities: { permissionModes: ["auto"] } }], models: [{ id: "model", model: "model", defaultReasoningEffort: "low", supportedReasoningEfforts: [{ reasoningEffort: "low" }] }] }) },
     system: { executionOptions: async () => ({ providers: [{ id: "codex", available: true }], models: [{ model: "model", routeProviderId: "codex", defaultReasoningEffort: "low", isDefault: true }] }) },
   } });
-  return host;
+  return { ...host, operations };
 }
 async function untilSettled(harness: ReturnType<typeof fixture>["harness"]) {
   for (let count = 0; count < 50; count++) {
@@ -36,19 +38,81 @@ async function untilSettled(harness: ReturnType<typeof fixture>["harness"]) {
   }
   assert.fail("prediction did not settle");
 }
+async function untilReleased(harness: ReturnType<typeof fixture>["harness"], threadId = "worker") {
+  for (let count = 0; count < 50; count++) {
+    if (harness.inspection.sdk.callsTo("threads.archive").some(([args]) => (args as { threadId?: string }).threadId === threadId)) return;
+    await new Promise(resolve => setImmediate(resolve));
+  }
+  assert.fail(`helper ${threadId} was not archived`);
+}
 test("server completes a prediction, keeps the source untouched, and cleans up its helper", async () => {
-  const { bb, harness } = fixture();
+  const { bb, harness, operations } = fixture();
   try {
     await plugin(bb);
     const initial = await harness.behavior.callRpc("ensure", { threadId: "source" }) as PredictionState;
     assert.ok(initial.generationId);
     const ready = await untilSettled(harness);
     assert.equal(ready.status, "ready"); assert.equal(ready.suggestion, "Show me the diff");
+    await untilReleased(harness);
     assert.equal(harness.inspection.sdk.callsTo("threads.spawn").length, 1);
-    assert.deepEqual(harness.inspection.sdk.callsTo("threads.archive"), [[{ threadId: "worker" }]]);
-    assert.deepEqual(harness.inspection.sdk.callsTo("threads.stop"), [[{ threadId: "worker" }]]);
+    assert.deepEqual(operations, ["stop:worker", "archive:worker"]);
     assert.equal(harness.inspection.sdk.callsTo("threads.send").length, 0);
   } finally { await harness.lifecycle.dispose(); }
+});
+test("a helper is stopped and archived as soon as its thread moves on", async () => {
+  const { bb, harness, operations } = fixture();
+  const running = { ...worker, status: "active" as const };
+  harness.sdk.stub("threads.get", async ({ threadId }) => threadId === "source" ? source : running);
+  try {
+    await plugin(bb);
+    await harness.behavior.callRpc("ensure", { threadId: "source" });
+    for (let count = 0; count < 50 && harness.inspection.sdk.callsTo("threads.spawn").length === 0; count++) await new Promise(resolve => setImmediate(resolve));
+    assert.equal(harness.inspection.sdk.callsTo("threads.spawn").length, 1);
+    await harness.behavior.emitThreadEvent("thread.active", { thread: { ...source, status: "active" } });
+    await untilReleased(harness);
+    assert.deepEqual(operations, ["stop:worker", "archive:worker"]);
+    const state = await harness.behavior.callRpc("get", { threadId: "source" }) as PredictionState;
+    assert.equal(state.status, "idle"); assert.equal(state.suggestion, null);
+    assert.equal(harness.inspection.sdk.callsTo("threads.output").length, 0);
+  } finally { await harness.lifecycle.dispose(); }
+});
+test("provider archive latency does not delay the suggestion", async () => {
+  const { bb, harness } = fixture();
+  let openGate: () => void = () => {};
+  const gate = new Promise<void>(resolve => { openGate = resolve; });
+  let archived = false;
+  harness.sdk.stub("threads.archive", async () => { await gate; archived = true; return { ok: true }; });
+  try {
+    await plugin(bb);
+    await harness.behavior.callRpc("ensure", { threadId: "source" });
+    const ready = await untilSettled(harness);
+    assert.equal(ready.status, "ready"); assert.equal(ready.suggestion, "Show me the diff");
+    assert.equal(archived, false);
+    openGate();
+    for (let count = 0; count < 50 && !archived; count++) await new Promise(resolve => setImmediate(resolve));
+    assert.equal(archived, true);
+  } finally { await harness.lifecycle.dispose(); }
+});
+test("a failed archive is logged, the suggestion still appears, and disposal retries it", async () => {
+  const { bb, harness } = fixture();
+  let attempts = 0;
+  harness.sdk.stub("threads.archive", async () => {
+    attempts += 1;
+    if (attempts === 1) throw new Error("archive unavailable");
+    return { ok: true };
+  });
+  let disposed = false;
+  try {
+    await plugin(bb);
+    await harness.behavior.callRpc("ensure", { threadId: "source" });
+    assert.equal((await untilSettled(harness)).suggestion, "Show me the diff");
+    for (let count = 0; count < 50 && !warned(harness, "archive unavailable"); count++) await new Promise(resolve => setImmediate(resolve));
+    assert.ok(warned(harness, "archive unavailable"));
+    assert.equal(attempts, 1);
+    await harness.lifecycle.dispose();
+    disposed = true;
+    assert.equal(attempts, 2);
+  } finally { if (!disposed) await harness.lifecycle.dispose(); }
 });
 test("a permission interaction created before spawn returns still cancels and cleans up the helper", async () => {
   const { bb, harness } = fixture({ pendingInteraction: true });
@@ -60,11 +124,29 @@ test("a permission interaction created before spawn returns still cancels and cl
   } finally { await harness.lifecycle.dispose(); }
 });
 test("startup recovers only this plugin's marked hidden helper threads", async () => {
-  const { bb, harness } = fixture({ abandoned: true });
+  const { bb, harness, operations } = fixture({ abandoned: true });
   try {
     await plugin(bb);
-    assert.deepEqual(harness.inspection.sdk.callsTo("threads.archive"), [[{ threadId: "worker" }]]);
-    assert.deepEqual(harness.inspection.sdk.callsTo("threads.stop"), [[{ threadId: "worker" }]]);
+    assert.deepEqual(operations, ["stop:worker", "archive:worker"]);
+  } finally { await harness.lifecycle.dispose(); }
+});
+test("startup archives finished pre-existing helpers and leaves the current thread and in-use helpers alone", async () => {
+  const { bb, harness, operations } = fixture();
+  const current = { ...source, id: "current", title: "Add auto-archiving", visibility: "visible" as const };
+  const finished = { ...worker, id: "finished", status: "idle" as const };
+  const failed = { ...worker, id: "failed", status: "error" as const };
+  const busy = { ...worker, id: "busy", status: "active" as const };
+  const starting = { ...worker, id: "starting-helper", status: "starting" as const };
+  const pending = { ...worker, id: "pending-helper", status: "pending" as const };
+  harness.sdk.stub("threads.list", async () => [
+    current, finished, failed, busy, starting, pending,
+    { ...worker, id: "unmarked" },
+    { ...finished, id: "already", archivedAt: 1 },
+  ]);
+  harness.sdk.stub("threads.getPluginMetadata", async ({ threadId }) => ({ predictionWorker: threadId !== "unmarked" }));
+  try {
+    await plugin(bb);
+    assert.deepEqual(operations, ["stop:finished", "archive:finished", "stop:failed", "archive:failed"]);
   } finally { await harness.lifecycle.dispose(); }
 });
 const warned = (harness: ReturnType<typeof fixture>["harness"], text: string) =>
@@ -109,6 +191,7 @@ test("a helper that cannot be stopped after asking for input is logged, not thro
     assert.deepEqual(errors, []);
     assert.ok(warned(harness, "already stopped"));
     assert.equal((await untilSettled(harness)).status, "error");
+    await untilReleased(harness);
     assert.deepEqual(harness.inspection.sdk.callsTo("threads.archive"), [[{ threadId: "worker" }]]);
   } finally { await harness.lifecycle.dispose(); }
 });

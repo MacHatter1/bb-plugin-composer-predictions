@@ -170,8 +170,8 @@ sequenceDiagram
     else new context
         Plugin->>Helper: one prediction request
         Helper-->>Plugin: {"suggestion": "…"} or null
-        Plugin->>Helper: archive and stop
         Plugin-->>Composer: suggestion
+        Plugin->>Helper: stop, then archive
     end
     Composer-->>You: ghost text and a Tab hint
     You->>Composer: Tab
@@ -180,8 +180,10 @@ sequenceDiagram
 
 - **One hidden request.** Each prediction runs in a hidden helper thread in
   the conversation's environment. It returns one line of up to 240
-  characters, or nothing. The helper is archived and stopped as soon as it
-  finishes, fails or reaches its 60-second timeout.
+  characters, or nothing. The helper is stopped and then archived as soon as
+  its answer is used or the conversation moves on, including at the provider
+  when that provider supports archive. A slow archive does not delay the
+  suggestion.
 - **Bounded context.** The input is rebuilt from up to 400 recent events:
   your messages, the agent's replies and completed tool records. Reasoning and
   binary data are left out, and the whole is capped at the conversation budget.

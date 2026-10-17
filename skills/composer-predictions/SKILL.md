@@ -7,8 +7,10 @@ description: Inspect, regenerate, or dismiss a thread's Composer Predictions sug
 
 Composer Predictions suggests the user's next message as ghost text in an
 empty thread composer after an agent reply. **Tab** inserts it as an editable
-draft. It never sends anything. Each prediction is one request to a hidden,
-archived helper thread; it never posts to the user's thread.
+draft. It never sends anything. Each prediction is one request to a hidden
+helper thread, stopped and then archived once its answer is used or the
+conversation moves on. Providers that support archive get that chat archived
+too. It never posts to the user's thread.
 
 ## Commands
 

@@ -98,17 +98,32 @@ export default async function plugin(bb: BbPluginApi) {
     return { key: sourceKey(JSON.stringify(identity), conversation), model: execution.model, conversation,
       execution: { projectId: thread.projectId, environmentId: thread.environmentId, providerId: execution.providerId, reasoningLevel: execution.reasoningLevel, ...(execution.serviceTier ? { serviceTier: execution.serviceTier } : {}) } };
   }
-  async function cleanupWorker(threadId: string) {
-    let archived = false;
-    let stopped = false;
-    try {
-      await bb.sdk.threads.archive({ threadId });
-      archived = true;
-    } catch (error) { bb.log.warn(`Prediction helper cleanup: ${String(error)}`); }
-    try { await bb.sdk.threads.stop({ threadId }); stopped = true; }
-    catch (error) { bb.log.warn(`Prediction helper stop: ${String(error)}`); }
-    if (archived && stopped) workers.delete(threadId);
-    rejectedWorkers.delete(threadId); wakeups.delete(threadId);
+  const workerReleases = new Map<string, Promise<void>>();
+  // Stop before archive. BB forwards an archive to the provider only once the
+  // helper is idle; archiving a running helper leaves that provider chat open.
+  // A failed archive stays tracked so reload and the next start can retry it.
+  // Deleting the BB thread would drop the only link to that chat.
+  function releaseWorker(threadId: string): Promise<void> {
+    const current = workerReleases.get(threadId);
+    if (current) return current;
+    const release = (async () => {
+      try { await bb.sdk.threads.stop({ threadId }); }
+      catch (error) { bb.log.warn(`Prediction helper stop: ${String(error)}`); }
+      try {
+        await bb.sdk.threads.archive({ threadId });
+        workers.delete(threadId);
+      } catch (error) { bb.log.warn(`Prediction helper archive: ${String(error)}`); }
+      finally {
+        workerReleases.delete(threadId);
+        rejectedWorkers.delete(threadId); wakeups.delete(threadId);
+      }
+    })();
+    workerReleases.set(threadId, release);
+    return release;
+  }
+  // Provider archive can take a while. The suggestion does not wait for it.
+  function releaseInBackground(threadId: string): void {
+    void releaseWorker(threadId);
   }
   async function waitForWorker(threadId: string, signal: AbortSignal) {
     signal.throwIfAborted();
@@ -151,7 +166,7 @@ export default async function plugin(bb: BbPluginApi) {
           }
           await waitForWorker(worker.id, signal);
         }
-      } finally { await cleanupWorker(worker.id); }
+      } finally { releaseInBackground(worker.id); }
     },
     changed: threadId => bb.realtime.publish(CHANNEL, { threadId }),
     log: error => bb.log.warn(`Prediction unavailable: ${String(error)}`),
@@ -215,9 +230,13 @@ export default async function plugin(bb: BbPluginApi) {
       return { exitCode: 0, stdout: argv.includes("--json") ? JSON.stringify(state) : state.suggestion ?? state.status };
     },
   });
-  bb.onDispose(async () => { await coordinator.dispose(); await Promise.allSettled([...workers].map(cleanupWorker)); });
+  bb.onDispose(async () => {
+    await coordinator.dispose();
+    await Promise.allSettled([...workers].map(threadId => releaseWorker(threadId)));
+  });
   // Lifecycle events are not replayed after a process crash. Reconcile only
-  // this plugin's marked, hidden, unarchived workers before accepting work.
+  // this plugin's marked, hidden, unarchived workers that have finished.
+  // The current conversation and a helper that is still running are left alone.
   // A failed lookup skips recovery for now; it must not stop the plugin loading.
   const abandoned: string[] = [];
   try {
@@ -225,6 +244,9 @@ export default async function plugin(bb: BbPluginApi) {
       const rows = await bb.sdk.threads.list({ originPluginId: bb.pluginId, includeHidden: true, archived: false, limit: 100, offset });
       for (const row of rows) {
         if (row.originPluginId !== bb.pluginId || row.title !== WORKER_TITLE || row.visibility !== "hidden" || row.archivedAt || row.deletedAt) continue;
+        // A helper that is still running belongs to a live prediction. The next
+        // start releases it once that prediction is idle or has failed.
+        if (row.status !== "idle" && row.status !== "error") continue;
         try {
           const metadata = await bb.sdk.threads.getPluginMetadata({ threadId: row.id, pluginId: bb.pluginId });
           if (metadata?.predictionWorker === true) abandoned.push(row.id);
@@ -233,5 +255,5 @@ export default async function plugin(bb: BbPluginApi) {
       if (rows.length < 100) break;
     }
   } catch (error) { bb.log.warn(`Prediction helper recovery: ${String(error)}`); }
-  for (const threadId of abandoned) { workers.add(threadId); await cleanupWorker(threadId); }
+  for (const threadId of abandoned) { workers.add(threadId); await releaseWorker(threadId); }
 }
