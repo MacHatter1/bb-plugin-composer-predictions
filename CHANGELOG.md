@@ -6,6 +6,16 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+### Fixed
+
+- Prediction helpers are stopped and then archived once their answer is used
+  or the conversation moves on, so providers that support thread archive get
+  that chat archived too. The suggestion is shown without waiting for the
+  provider. A failed archive is logged and retried on reload and on the next
+  start.
+- Startup cleanup releases finished helpers left from before this behaviour.
+  The current conversation and a helper that is still running are left alone.
+
 ## 0.4.1 - 2026-10-16
 
 ### Fixed

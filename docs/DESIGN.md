@@ -42,14 +42,24 @@ error. The plugin never silently substitutes another model.
 Each prediction is a hidden helper thread in the same environment, titled
 *Composer prediction helper* and marked in its plugin metadata. It makes one
 prediction request. It does not continue the source conversation or submit a
-message there. Helpers are archived and stopped after completion,
-cancellation, failure, or a 60-second timeout. On startup, the plugin finds
-its own marked, hidden, unarchived helpers left by an interrupted server
-process and cleans them up. If that lookup fails, it logs a warning, cleans up
-the helpers it could read, and loads anyway; the rest are found on the next
-start. A failed stop after a helper asks for approval or input is also only
-logged, because the helper's own cleanup stops it again. Normal provider usage
-and billing apply.
+message there. Helpers are stopped and then archived once their answer is
+used or the prediction is discarded because the conversation moved on
+(the thread starts running, fails, is archived or deleted, queues or
+dispatches a message, is dismissed, or the 60-second timeout fires). Stopping
+first matters: BB forwards an archive to a provider that advertises
+`supportsThreadArchive` only once the helper is idle. Archiving a helper that
+is still running leaves the provider chat open. The archive runs in the
+background, so a slow provider does not delay the suggestion. A failed archive
+is logged and the helper stays tracked for another try on reload and on the
+next start; the BB thread is not deleted, because it is the link to that chat.
+On startup, the plugin finds its own marked, hidden, unarchived helpers that
+have finished (idle or failed) and releases them the same way. The current
+conversation and a helper that is still running are left alone; a running
+helper is released on a later start, once it is idle or has failed. If that
+lookup fails, it logs a warning, releases the helpers it could read, and loads
+anyway; the rest are found on the next start. A failed stop after a helper
+asks for approval or input is also only logged, and the same release archives
+it once it can be stopped. Normal provider usage and billing apply.
 
 The prediction instruction in `lib/prediction.ts` reproduces the
 composer-predictions remote config v5 inspected on 16 October 2026. A
