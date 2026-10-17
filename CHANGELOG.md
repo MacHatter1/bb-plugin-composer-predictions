@@ -6,6 +6,8 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+## 0.4.2 - 2026-10-17
+
 ### Fixed
 
 - Prediction helpers are stopped and then archived once their answer is used
