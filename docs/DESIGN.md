@@ -34,10 +34,11 @@ effort is not offered by the model, the model's default effort is used. A
 separate model's provider receives the same reconstructed conversation,
 including tool output, that the conversation's own provider would.
 
-The chosen provider must support BB's `auto` permission mode, and the model
-must be available on the source conversation's machine, including for SSH
-conversations. An unavailable provider, model or service tier produces an
-error. The plugin never silently substitutes another model.
+The model must be available on the source conversation's machine, including
+for SSH conversations. The provider must be able to approve automatically, or
+to ask for approval. A provider whose only mode is Full Access is refused,
+because that mode never asks. An unavailable provider, model or service tier
+produces an error. The plugin never silently substitutes another model.
 
 Each prediction is a hidden helper thread in the same environment, titled
 *Composer prediction helper* and marked in its plugin metadata. It makes one
@@ -45,15 +46,18 @@ prediction request. It does not continue the source conversation or submit a
 message there. Helpers are stopped and then archived once their answer is
 used or the prediction is discarded because the conversation moved on
 (the thread starts running, fails, is archived or deleted, queues or
-dispatches a message, is dismissed, or the 60-second timeout fires). Stopping
-first matters: BB forwards an archive to a provider that advertises
+dispatches a message, is dismissed, or the 60-second timeout fires). A helper
+that is waiting for an approval is not subject to that timeout. It stays up
+until you answer or the conversation moves on. Stopping first matters: BB
+forwards an archive to a provider that advertises
 `supportsThreadArchive` only once the helper is idle. Archiving a helper that
 is still running leaves the provider chat open. The archive runs in the
 background, so a slow provider does not delay the suggestion. A failed archive
 is logged and the helper stays tracked for another try on reload and on the
 next start; the BB thread is not deleted, because it is the link to that chat.
-On startup, the plugin finds its own marked, hidden, unarchived helpers that
-have finished (idle or failed) and releases them the same way. The current
+On startup, the plugin finds its own marked, unarchived helpers that
+have finished (idle or failed) and releases them the same way, including one
+left visible because it was opened for approval. The current
 conversation and a helper that is still running are left alone; a running
 helper is released on a later start, once it is idle or has failed. If that
 lookup fails, it logs a warning, releases the helpers it could read, and loads
@@ -94,10 +98,15 @@ archived hidden thread.
 
 ## Tools and permissions
 
-The helper is instructed not to call tools or take actions. It runs in BB's
-`auto` permission mode, and it is stopped if it asks for an interaction,
-including one raised before `spawn()` returns. The plugin selects no tools or
-skills of its own for the helper. The SDK's plugin-local `tools: []` does not
+The helper is instructed not to call tools or take actions. When the provider
+supports `auto`, the helper uses it and is stopped if it asks for an
+interaction, including one raised before `spawn()` returns. When the provider
+cannot approve automatically but can ask, the helper uses `accept-edits`
+instead. An approval is not failed closed: the helper is shown and opened
+beside the conversation, and the suggestion waits until you answer. It is
+hidden again before it is archived. Full Access is never selected for a
+helper. The plugin selects no tools or skills of its own for the helper. The
+SDK's plugin-local `tools: []` does not
 remove BB's core tools or other plugins' tools, so this is not a tool-free
 provider sandbox.
 

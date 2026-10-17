@@ -142,8 +142,10 @@ bb plugin install path:$PWD --yes
 **Requirements**
 
 - bb **0.46+** (Plugin SDK 0.6.49+)
-- A provider that supports BB's `auto` permission mode, with the prediction
-  model available on the conversation's machine
+- The prediction model available on the conversation's machine. A provider
+  that can approve automatically runs the helper unattended. A provider that
+  asks for approval can be used too: the helper opens beside the conversation
+  when it needs a decision. Full Access, which never asks, is not used.
 
 ## Where to find it
 
@@ -183,7 +185,9 @@ sequenceDiagram
   characters, or nothing. The helper is stopped and then archived as soon as
   its answer is used or the conversation moves on, including at the provider
   when that provider supports archive. A slow archive does not delay the
-  suggestion.
+  suggestion. If the provider cannot approve automatically, an approval opens
+  that helper beside the conversation and the suggestion waits until you
+  answer.
 - **Bounded context.** The input is rebuilt from up to 400 recent events:
   your messages, the agent's replies and completed tool records. Reasoning and
   binary data are left out, and the whole is capped at the conversation budget.
@@ -221,9 +225,11 @@ Context limits, cache rules, key handling and compatibility are covered in
   suggestion, its status and a fingerprint. BB itself keeps each helper's
   history, including the quoted conversation, as an archived hidden thread.
 - ⚠️ **Not a sandbox.** The helper is told not to use tools and to treat the
-  conversation as quoted data. It runs in `auto` permission mode and is
-  stopped if it asks for approval or input, but the plugin cannot remove BB's
-  core tools or other plugins' tools from it.
+  conversation as quoted data. A provider that can approve automatically runs
+  it in `auto` and the helper is stopped if it asks for approval or input.
+  A provider that cannot is run in the mode that asks, and that approval is
+  shown to you. The plugin cannot remove BB's core tools or other plugins'
+  tools from the helper.
 
 ## CLI
 

@@ -58,3 +58,7 @@ few seconds later.
 - The prediction model is chosen in **Settings → Plugins → Composer
   Predictions → Prediction model**. Point the user there; there is no CLI for
   it.
+- A provider that cannot approve automatically is still allowed when it can
+  ask. BB then opens the helper beside the conversation and the suggestion
+  waits. Answer there, or move the conversation on to cancel it. Providers
+  that approve automatically stay hidden and are stopped if they ask.

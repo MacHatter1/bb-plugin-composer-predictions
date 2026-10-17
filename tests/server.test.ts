@@ -55,6 +55,7 @@ test("server completes a prediction, keeps the source untouched, and cleans up i
     assert.equal(ready.status, "ready"); assert.equal(ready.suggestion, "Show me the diff");
     await untilReleased(harness);
     assert.equal(harness.inspection.sdk.callsTo("threads.spawn").length, 1);
+    assert.equal((harness.inspection.sdk.callsTo("threads.spawn")[0][0] as { permissionMode?: string }).permissionMode, "auto");
     assert.deepEqual(operations, ["stop:worker", "archive:worker"]);
     assert.equal(harness.inspection.sdk.callsTo("threads.send").length, 0);
   } finally { await harness.lifecycle.dispose(); }
@@ -142,11 +143,15 @@ test("startup archives finished pre-existing helpers and leaves the current thre
     current, finished, failed, busy, starting, pending,
     { ...worker, id: "unmarked" },
     { ...finished, id: "already", archivedAt: 1 },
+    { ...worker, id: "shown-busy", status: "active", visibility: "visible" },
+    { ...finished, id: "shown", visibility: "visible" },
   ]);
   harness.sdk.stub("threads.getPluginMetadata", async ({ threadId }) => ({ predictionWorker: threadId !== "unmarked" }));
+  harness.sdk.stub("threads.update", async () => worker);
   try {
     await plugin(bb);
-    assert.deepEqual(operations, ["stop:finished", "archive:finished", "stop:failed", "archive:failed"]);
+    assert.deepEqual(operations, ["stop:finished", "archive:finished", "stop:failed", "archive:failed", "stop:shown", "archive:shown"]);
+    assert.deepEqual(harness.inspection.sdk.callsTo("threads.update"), [[{ threadId: "shown", visibility: "hidden" }]]);
   } finally { await harness.lifecycle.dispose(); }
 });
 const warned = (harness: ReturnType<typeof fixture>["harness"], text: string) =>
@@ -236,6 +241,83 @@ test("separate prediction model persists across reload, routes through the sourc
     await currentHarness.behavior.callRpc("ensure", { threadId: "source" });
     assert.equal((await untilSettled(currentHarness)).model, "model");
   } finally { await currentHarness.lifecycle.dispose(); }
+});
+const askingCatalog = {
+  providers: [{ id: "codex", capabilities: { permissionModes: ["full", "accept-edits"] } }],
+  models: [{ id: "model", model: "model", defaultReasoningEffort: "low", supportedReasoningEfforts: [{ reasoningEffort: "low" }] }],
+};
+async function untilCalled(harness: ReturnType<typeof fixture>["harness"], path: string) {
+  for (let count = 0; count < 50 && harness.inspection.sdk.callsTo(path).length === 0; count++) await new Promise(resolve => setImmediate(resolve));
+  assert.notEqual(harness.inspection.sdk.callsTo(path).length, 0, path);
+}
+test("a provider without automatic approval still predicts, and asks beside the conversation when it needs approval", async () => {
+  const { bb, harness } = fixture();
+  let interactions: { id: string }[] = [{ id: "permission" }];
+  let status: "active" | "idle" = "active";
+  harness.sdk.stub("providers.models", async () => askingCatalog);
+  harness.sdk.stub("threads.interactions.list", async () => interactions);
+  harness.sdk.stub("threads.get", async ({ threadId }) => threadId === "source" ? source : { ...worker, status });
+  harness.sdk.stub("threads.update", async () => worker);
+  harness.sdk.stub("threads.open", async () => ({ delivered: true }));
+  try {
+    await plugin(bb);
+    const saved = await harness.behavior.callRpc("model_set", { providerId: "codex", model: "model", reasoningLevel: "low" }) as ModelSettings;
+    assert.deepEqual(saved.selection, { providerId: "codex", model: "model", reasoningLevel: "low" });
+    await harness.behavior.callRpc("ensure", { threadId: "source" });
+    await untilCalled(harness, "threads.open");
+    assert.equal((harness.inspection.sdk.callsTo("threads.spawn")[0][0] as { permissionMode?: string }).permissionMode, "accept-edits");
+    assert.deepEqual(harness.inspection.sdk.callsTo("threads.update")[0], [{ threadId: "worker", visibility: "visible" }]);
+    assert.deepEqual(harness.inspection.sdk.callsTo("threads.open")[0], [{ threadId: "worker", file: null, split: "right" }]);
+    const { errors } = await harness.behavior.emitThreadEvent("interaction.pending", { thread: { ...worker, status: "active" }, interaction: { id: "permission" } as never });
+    assert.deepEqual(errors, []);
+    assert.equal(harness.inspection.sdk.callsTo("threads.stop").length, 0);
+    assert.equal(harness.inspection.sdk.callsTo("threads.output").length, 0);
+    interactions = [];
+    status = "idle";
+    const deadline = Date.now() + 3000;
+    let ready: PredictionState = { threadId: "source", sourceKey: null, generationId: null, status: "generating", suggestion: null, model: null, contextCharacters: 0, updatedAt: 0, error: null };
+    while (Date.now() < deadline) {
+      await harness.behavior.emitThreadEvent("thread.idle", { thread: { ...worker, status: "idle" }, lastAssistantText: null });
+      ready = await harness.behavior.callRpc("get", { threadId: "source" }) as PredictionState;
+      if (ready.status !== "generating") break;
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    assert.equal(ready.status, "ready"); assert.equal(ready.suggestion, "Show me the diff");
+    await untilReleased(harness);
+    assert.deepEqual(harness.inspection.sdk.callsTo("threads.update").at(-1), [{ threadId: "worker", visibility: "hidden" }]);
+  } finally { await harness.lifecycle.dispose(); }
+});
+test("moving the conversation on cancels a helper that is waiting for approval", async () => {
+  const { bb, harness, operations } = fixture();
+  harness.sdk.stub("providers.models", async () => askingCatalog);
+  harness.sdk.stub("threads.interactions.list", async () => [{ id: "permission" }]);
+  harness.sdk.stub("threads.get", async ({ threadId }) => threadId === "source" ? source : { ...worker, status: "active" });
+  harness.sdk.stub("threads.update", async () => worker);
+  harness.sdk.stub("threads.open", async () => ({ delivered: true }));
+  try {
+    await plugin(bb);
+    await harness.behavior.callRpc("ensure", { threadId: "source" });
+    await untilCalled(harness, "threads.open");
+    assert.equal((harness.inspection.sdk.callsTo("threads.spawn")[0][0] as { permissionMode?: string }).permissionMode, "accept-edits");
+    await harness.behavior.emitThreadEvent("thread.active", { thread: { ...source, status: "active" } });
+    await untilReleased(harness);
+    assert.deepEqual(operations, ["stop:worker", "archive:worker"]);
+    const state = await harness.behavior.callRpc("get", { threadId: "source" }) as PredictionState;
+    assert.equal(state.status, "idle"); assert.equal(state.suggestion, null);
+    assert.equal(harness.inspection.sdk.callsTo("threads.output").length, 0);
+  } finally { await harness.lifecycle.dispose(); }
+});
+test("a provider with only full access cannot be selected for predictions", async () => {
+  const { bb, harness } = fixture();
+  harness.sdk.stub("providers.models", async () => ({ ...askingCatalog, providers: [{ id: "codex", capabilities: { permissionModes: ["full"] } }] }));
+  try {
+    await plugin(bb);
+    await assert.rejects(() => harness.behavior.callRpc("model_set", { providerId: "codex", model: "model", reasoningLevel: "low" }), /ask you for approval/);
+    assert.equal((await harness.behavior.callRpc("model_get", {}) as ModelSettings).selection, null);
+    await harness.behavior.callRpc("ensure", { threadId: "source" });
+    assert.equal((await untilSettled(harness)).status, "error");
+    assert.equal(harness.inspection.sdk.callsTo("threads.spawn").length, 0);
+  } finally { await harness.lifecycle.dispose(); }
 });
 test("invalid or unavailable prediction models cannot silently switch to another model", async () => {
   const { bb, harness } = fixture();
