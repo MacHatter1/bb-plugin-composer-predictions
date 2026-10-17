@@ -1,6 +1,6 @@
 {
   "name": "bb-plugin-composer-predictions",
-  "version": "0.4.2",
+  "version": "0.5.0",
   "description": "Inline next-message suggestions for BB. Press Tab to insert an editable draft.",
   "type": "module",
   "license": "MIT",
