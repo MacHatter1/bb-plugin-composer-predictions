@@ -6,7 +6,8 @@ import { CACHE_MIGRATIONS, SqlitePredictionCache } from "./lib/cache";
 import { buildConversation, generationPrompt, parsePrediction, sourceKey, PREDICTION_PROMPT, WORKER_INSTRUCTIONS, type RecordedEvent } from "./lib/prediction";
 
 const WORKER_TITLE = "Composer prediction helper";
-type PredictionSource = Source & { execution: { projectId: string; environmentId: string | null; providerId: string; reasoningLevel: string; serviceTier?: string } };
+type PredictionPermissionMode = "auto" | "accept-edits";
+type PredictionSource = Source & { execution: { projectId: string; environmentId: string | null; providerId: string; reasoningLevel: string; permissionMode: PredictionPermissionMode; serviceTier?: string } };
 const MODEL_KEY = "prediction-model";
 const PROMPT_KEY = sourceKey(PREDICTION_PROMPT, WORKER_INSTRUCTIONS);
 
@@ -25,11 +26,25 @@ export default async function plugin(bb: BbPluginApi) {
   const interested = new Set<string>();
   const workers = new Set<string>();
   const rejectedWorkers = new Set<string>();
+  // Helpers whose provider cannot approve automatically. An approval they raise
+  // is shown to the user instead of failing the prediction.
+  const promptedWorkers = new Set<string>();
+  const approvalRequested = new Set<string>();
+  const revealedWorkers = new Set<string>();
+  const presentingApproval = new Map<string, Promise<void>>();
   const wakeups = new Map<string, () => void>();
   type Catalog = Awaited<ReturnType<typeof bb.sdk.providers.models>>;
+  // `auto` stays unattended. Otherwise ask in the workspace mode. `full` never
+  // asks, so it is not a stand-in for a provider that cannot approve automatically.
+  function predictionPermissionMode(modes: readonly string[] | undefined): PredictionPermissionMode {
+    if (modes?.includes("auto")) return "auto";
+    if (modes?.includes("accept-edits")) return "accept-edits";
+    throw new Error("This prediction provider cannot approve automatically or ask you for approval.");
+  }
   function resolveModel(catalog: Catalog, preferred: ModelSelection): ModelSelection {
     const provider = catalog.providers.find(row => row.id === preferred.providerId);
-    if (!provider?.capabilities.permissionModes.includes("auto")) throw new Error("This prediction provider must support automatic approval mode.");
+    if (!provider) throw new Error(`Prediction model ${preferred.model} is unavailable for ${preferred.providerId} on this machine.`);
+    predictionPermissionMode(provider.capabilities.permissionModes);
     const model = catalog.models.find(row => row.model === preferred.model || row.id === preferred.model);
     if (!model) throw new Error(`Prediction model ${preferred.model} is unavailable for ${preferred.providerId} on this machine.`);
     const efforts = model.supportedReasoningEfforts.map(row => row.reasoningEffort);
@@ -82,7 +97,8 @@ export default async function plugin(bb: BbPluginApi) {
     const model = catalog.models.find(row => row.model === wantedModel || row.id === wantedModel);
     const efforts = model?.supportedReasoningEfforts.map(row => row.reasoningEffort) ?? [];
     const automaticEffort = ["low", "none", "medium"].find(effort => efforts.includes(effort)) ?? model?.defaultReasoningEffort ?? "low";
-    const execution = resolveModel(catalog, override ?? modelSelectionSchema.parse({ providerId, model: wantedModel, reasoningLevel: automaticEffort }));
+    const executionModel = resolveModel(catalog, override ?? modelSelectionSchema.parse({ providerId, model: wantedModel, reasoningLevel: automaticEffort }));
+    const permissionMode = predictionPermissionMode(catalog.providers.find(row => row.id === executionModel.providerId)?.capabilities.permissionModes);
     const events: RecordedEvent[] = [];
     let beforeSeq: string | undefined;
     for (let page = 0; page < 4; page++) {
@@ -93,10 +109,10 @@ export default async function plugin(bb: BbPluginApi) {
     }
     const conversation = buildConversation(events, config.contextCharacters);
     if (!conversation) return null;
-    const identity = { version: 1, prompt: PROMPT_KEY, execution, contextCharacters: config.contextCharacters,
+    const identity = { version: 1, prompt: PROMPT_KEY, execution: executionModel, contextCharacters: config.contextCharacters,
       projectId: thread.projectId, environmentId: thread.environmentId, latestSeq: Math.max(...events.map(event => event.seq)) };
-    return { key: sourceKey(JSON.stringify(identity), conversation), model: execution.model, conversation,
-      execution: { projectId: thread.projectId, environmentId: thread.environmentId, providerId: execution.providerId, reasoningLevel: execution.reasoningLevel, ...(execution.serviceTier ? { serviceTier: execution.serviceTier } : {}) } };
+    return { key: sourceKey(JSON.stringify(identity), conversation), model: executionModel.model, conversation,
+      execution: { projectId: thread.projectId, environmentId: thread.environmentId, providerId: executionModel.providerId, reasoningLevel: executionModel.reasoningLevel, permissionMode, ...(executionModel.serviceTier ? { serviceTier: executionModel.serviceTier } : {}) } };
   }
   const workerReleases = new Map<string, Promise<void>>();
   // Stop before archive. BB forwards an archive to the provider only once the
@@ -109,13 +125,20 @@ export default async function plugin(bb: BbPluginApi) {
     const release = (async () => {
       try { await bb.sdk.threads.stop({ threadId }); }
       catch (error) { bb.log.warn(`Prediction helper stop: ${String(error)}`); }
+      // A helper opened for approval would otherwise stay in the sidebar after
+      // its archive. Hiding can fail; the archive is still the cleanup that matters.
+      if (revealedWorkers.has(threadId)) {
+        try { await bb.sdk.threads.update({ threadId, visibility: "hidden" }); }
+        catch (error) { bb.log.warn(`Prediction helper hide: ${String(error)}`); }
+      }
       try {
         await bb.sdk.threads.archive({ threadId });
         workers.delete(threadId);
       } catch (error) { bb.log.warn(`Prediction helper archive: ${String(error)}`); }
       finally {
         workerReleases.delete(threadId);
-        rejectedWorkers.delete(threadId); wakeups.delete(threadId);
+        rejectedWorkers.delete(threadId); promptedWorkers.delete(threadId); approvalRequested.delete(threadId);
+        revealedWorkers.delete(threadId); presentingApproval.delete(threadId); wakeups.delete(threadId);
       }
     })();
     workerReleases.set(threadId, release);
@@ -124,6 +147,20 @@ export default async function plugin(bb: BbPluginApi) {
   // Provider archive can take a while. The suggestion does not wait for it.
   function releaseInBackground(threadId: string): void {
     void releaseWorker(threadId);
+  }
+  // Hidden threads are not in the sidebar, so the approval card would never
+  // appear. Show the helper and open it beside the conversation.
+  function presentApproval(threadId: string): Promise<void> {
+    const current = presentingApproval.get(threadId);
+    if (current) return current;
+    const task = (async () => {
+      await bb.sdk.threads.update({ threadId, visibility: "visible" });
+      revealedWorkers.add(threadId);
+      await bb.sdk.threads.open({ threadId, file: null, split: "right" });
+    })();
+    presentingApproval.set(threadId, task);
+    void task.then(() => {}, () => { if (presentingApproval.get(threadId) === task) presentingApproval.delete(threadId); });
+    return task;
   }
   async function waitForWorker(threadId: string, signal: AbortSignal) {
     signal.throwIfAborted();
@@ -139,34 +176,71 @@ export default async function plugin(bb: BbPluginApi) {
     source,
     async generate(threadId, snapshot, parentSignal) {
       const execution = snapshot.execution;
-      const signal = AbortSignal.any([parentSignal, AbortSignal.timeout(60000)]);
-      signal.throwIfAborted();
-      const worker = await bb.sdk.threads.spawn({
-        projectId: execution.projectId,
-        environment: execution.environmentId ? { type: "reuse", environmentId: execution.environmentId } : { type: "project-default" },
-        providerId: execution.providerId, model: snapshot.model, reasoningLevel: execution.reasoningLevel,
-        ...(execution.serviceTier ? { serviceTier: execution.serviceTier } : {}),
-        permissionMode: "auto", visibility: "hidden", title: WORKER_TITLE,
-        pluginMetadata: { predictionWorker: true }, prompt: generationPrompt(snapshot.conversation),
-      });
-      workers.add(worker.id);
+      const asksForApproval = execution.permissionMode !== "auto";
+      let signal = parentSignal;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let timeout = new AbortController();
+      let holdingForApproval = false;
+      // The 60s bound covers the model request. It does not cover a person
+      // answering an approval; that wait ends when they answer or the conversation moves on.
+      const armTimeout = () => {
+        clearTimeout(timer);
+        if (timeout.signal.aborted) timeout = new AbortController();
+        timer = setTimeout(() => timeout.abort(), 60_000);
+        signal = AbortSignal.any([parentSignal, timeout.signal]);
+      };
+      const holdForApproval = () => {
+        clearTimeout(timer);
+        timer = undefined;
+        signal = parentSignal;
+        holdingForApproval = true;
+      };
+      armTimeout();
       try {
-        // An interaction can be committed before spawn() resolves, before the
-        // event listener can recognise this id as one of our workers.
-        const interactions = await bb.sdk.threads.interactions.list({ threadId: worker.id, signal });
-        if (interactions.length > 0) throw new Error("Prediction helper requested an interaction");
-        for (;;) {
-          signal.throwIfAborted();
-          if (rejectedWorkers.has(worker.id)) throw new Error("Prediction helper requested an interaction");
-          const current = await bb.sdk.threads.get({ threadId: worker.id, signal });
-          if (current.status === "error" || current.archivedAt || current.deletedAt) throw new Error("Prediction helper failed");
-          if (current.status === "idle") {
-            const { output } = await bb.sdk.threads.output({ threadId: worker.id, signal });
-            if (output?.trim()) return parsePrediction(output);
+        signal.throwIfAborted();
+        const worker = await bb.sdk.threads.spawn({
+          projectId: execution.projectId,
+          environment: execution.environmentId ? { type: "reuse", environmentId: execution.environmentId } : { type: "project-default" },
+          providerId: execution.providerId, model: snapshot.model, reasoningLevel: execution.reasoningLevel,
+          ...(execution.serviceTier ? { serviceTier: execution.serviceTier } : {}),
+          permissionMode: execution.permissionMode, visibility: "hidden", title: WORKER_TITLE,
+          pluginMetadata: { predictionWorker: true }, prompt: generationPrompt(snapshot.conversation),
+        });
+        workers.add(worker.id);
+        if (asksForApproval) promptedWorkers.add(worker.id);
+        try {
+          // An interaction can be committed before spawn() resolves, before the
+          // event listener can recognise this id as one of our workers.
+          const pendingAtStart = await bb.sdk.threads.interactions.list({ threadId: worker.id, signal });
+          if (pendingAtStart.length > 0) {
+            if (!asksForApproval) throw new Error("Prediction helper requested an interaction");
+            approvalRequested.add(worker.id);
           }
-          await waitForWorker(worker.id, signal);
-        }
-      } finally { releaseInBackground(worker.id); }
+          for (;;) {
+            parentSignal.throwIfAborted();
+            if (asksForApproval && approvalRequested.has(worker.id) && !holdingForApproval) holdForApproval();
+            const pending = asksForApproval && (await bb.sdk.threads.interactions.list({ threadId: worker.id, signal })).length > 0;
+            if (pending) {
+              approvalRequested.add(worker.id);
+              if (!holdingForApproval) holdForApproval();
+              try { await presentApproval(worker.id); }
+              catch (error) { bb.log.warn(`Prediction helper approval: ${String(error)}`); }
+            } else {
+              if (asksForApproval) approvalRequested.delete(worker.id);
+              if (holdingForApproval) { holdingForApproval = false; armTimeout(); }
+              signal.throwIfAborted();
+              if (rejectedWorkers.has(worker.id)) throw new Error("Prediction helper requested an interaction");
+              const current = await bb.sdk.threads.get({ threadId: worker.id, signal });
+              if (current.status === "error" || current.archivedAt || current.deletedAt) throw new Error("Prediction helper failed");
+              if (current.status === "idle") {
+                const { output } = await bb.sdk.threads.output({ threadId: worker.id, signal });
+                if (output?.trim()) return parsePrediction(output);
+              }
+            }
+            await waitForWorker(worker.id, signal);
+          }
+        } finally { releaseInBackground(worker.id); }
+      } finally { clearTimeout(timer); }
     },
     changed: threadId => bb.realtime.publish(CHANNEL, { threadId }),
     log: error => bb.log.warn(`Prediction unavailable: ${String(error)}`),
@@ -202,6 +276,12 @@ export default async function plugin(bb: BbPluginApi) {
     bb.events.on(name, ({ entry }) => { if (interested.has(entry.threadId)) coordinator.clear(entry.threadId); });
   }
   bb.events.on("interaction.pending", async ({ thread }) => {
+    if (promptedWorkers.has(thread.id)) {
+      approvalRequested.add(thread.id); wakeups.get(thread.id)?.();
+      try { await presentApproval(thread.id); }
+      catch (error) { bb.log.warn(`Prediction helper approval: ${String(error)}`); }
+      return;
+    }
     if (workers.has(thread.id)) {
       rejectedWorkers.add(thread.id); wakeups.get(thread.id)?.();
       // The generation's own cleanup stops the helper again, so a failure here only needs logging.
@@ -235,7 +315,8 @@ export default async function plugin(bb: BbPluginApi) {
     await Promise.allSettled([...workers].map(threadId => releaseWorker(threadId)));
   });
   // Lifecycle events are not replayed after a process crash. Reconcile only
-  // this plugin's marked, hidden, unarchived workers that have finished.
+  // this plugin's marked, unarchived workers that have finished. A helper
+  // opened for approval is visible; it is hidden again before it is archived.
   // The current conversation and a helper that is still running are left alone.
   // A failed lookup skips recovery for now; it must not stop the plugin loading.
   const abandoned: string[] = [];
@@ -243,13 +324,17 @@ export default async function plugin(bb: BbPluginApi) {
     for (let offset = 0; ; offset += 100) {
       const rows = await bb.sdk.threads.list({ originPluginId: bb.pluginId, includeHidden: true, archived: false, limit: 100, offset });
       for (const row of rows) {
-        if (row.originPluginId !== bb.pluginId || row.title !== WORKER_TITLE || row.visibility !== "hidden" || row.archivedAt || row.deletedAt) continue;
-        // A helper that is still running belongs to a live prediction. The next
-        // start releases it once that prediction is idle or has failed.
+        if (row.originPluginId !== bb.pluginId || row.title !== WORKER_TITLE || row.archivedAt || row.deletedAt) continue;
+        // A helper that is still running belongs to a live prediction, including
+        // one waiting for approval. The next start releases it once that
+        // prediction is idle or has failed.
         if (row.status !== "idle" && row.status !== "error") continue;
         try {
           const metadata = await bb.sdk.threads.getPluginMetadata({ threadId: row.id, pluginId: bb.pluginId });
-          if (metadata?.predictionWorker === true) abandoned.push(row.id);
+          if (metadata?.predictionWorker === true) {
+            if (row.visibility === "visible") revealedWorkers.add(row.id);
+            abandoned.push(row.id);
+          }
         } catch (error) { bb.log.warn(`Prediction helper recovery skipped ${row.id}: ${String(error)}`); }
       }
       if (rows.length < 100) break;

@@ -37,9 +37,11 @@ Each request carries up to 48,000 characters of recent messages and tool
 output by default. A separate prediction model's provider receives that too.
 The plugin's database stores the suggestion, its status and a fingerprint,
 not your conversation. BB keeps each helper's history as an archived hidden
-thread. The helper is told not to use tools and runs in `auto` permission
-mode; it is stopped if it asks for approval or input, but it is not a
-tool-free sandbox.
+thread. The helper is told not to use tools. A provider that can approve
+automatically runs it in `auto` permission mode, and the helper is stopped if
+it asks for approval or input. A provider that cannot is allowed to ask: the
+helper opens beside the conversation until you answer. It is not a tool-free
+sandbox.
 
 ## How it works
 
@@ -52,5 +54,6 @@ composer, it shows nothing and leaves Tab alone.
 
 ## Requirements
 
-bb 0.46 or later, and a provider that supports BB's `auto` permission mode,
-with the prediction model available on the conversation's machine.
+bb 0.46 or later, with the prediction model available on the conversation's
+machine. The provider must be able to approve automatically or ask for
+approval. Full Access is not used.

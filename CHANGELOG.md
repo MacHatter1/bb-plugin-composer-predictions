@@ -6,6 +6,14 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+### Changed
+
+- A prediction provider that cannot approve automatically can still be used,
+  as long as it can ask for approval. The helper opens beside the conversation
+  when it needs a decision, and the suggestion waits until you answer or the
+  conversation moves on. Providers that approve automatically still run
+  unattended and stop if they ask. Full Access is not used.
+
 ## 0.4.2 - 2026-10-17
 
 ### Fixed
