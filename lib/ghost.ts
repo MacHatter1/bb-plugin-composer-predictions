@@ -22,6 +22,11 @@ export function mountGhostDecorations(doc: Document): () => void {
     [data-composer-prediction-ghost]:not([hidden]) { display:flex; align-items:baseline; }
     [data-composer-prediction-ghost] span { min-width:0; overflow:hidden; display:-webkit-box; -webkit-box-orient:vertical; }
     [data-composer-prediction-ghost] kbd { flex-shrink:0; margin-left:.65em; padding:0 .35em; border:1px solid currentColor; border-radius:4px; font:10px/1.5 ui-monospace,monospace; opacity:.8; white-space:nowrap; }
+    [data-composer-prediction-ghost] .prediction-swipe-hint { display:none; }
+    @media (pointer:coarse) {
+      [data-composer-prediction-ghost] .prediction-tab-hint { display:none; }
+      [data-composer-prediction-ghost] .prediction-swipe-hint { display:block; }
+    }
   `;
   doc.head.append(style);
   type Decoration = { editor: HTMLElement; update(): void; dispose(): void };
@@ -39,19 +44,21 @@ export function mountGhostDecorations(doc: Document): () => void {
     overlay.setAttribute("aria-hidden", "true");
     overlay.inert = true;
     const text = doc.createElement("span");
-    const key = doc.createElement("kbd"); key.textContent = "Tab";
-    overlay.append(text, key); parent.append(overlay);
+    const key = doc.createElement("kbd"); key.textContent = "Tab"; key.className = "prediction-tab-hint";
+    const swipeHint = doc.createElement("kbd"); swipeHint.textContent = "Swipe →"; swipeHint.className = "prediction-swipe-hint";
+    overlay.append(text, key, swipeHint); parent.append(overlay);
     let composing = false;
     let dismissed = false;
     let lastGeneration: string | null = null;
     let visible = false;
+    let swipe: { id: number; x: number; y: number; startedAt: number; generationId: string | null } | null = null;
     function update() {
       const state = binding.snapshot();
-      if (state.generationId !== lastGeneration) { lastGeneration = state.generationId; dismissed = false; }
+      if (state.generationId !== lastGeneration) { lastGeneration = state.generationId; dismissed = false; swipe = null; }
       const form = editor.closest("form[data-promptbox]");
       visible = state.eligible && !!state.suggestion && !composing && !dismissed && !editor.textContent?.trim() && editor.getAttribute("contenteditable") === "true" && !form?.hasAttribute("data-promptbox-voice-active");
       overlay.hidden = !visible;
-      if (!visible) { delete editor.dataset.composerPredictionActive; return; }
+      if (!visible) { swipe = null; delete editor.dataset.composerPredictionActive; return; }
       editor.dataset.composerPredictionActive = "";
       if (text.textContent !== state.suggestion) text.textContent = state.suggestion;
       const font = win.getComputedStyle(editor);
@@ -65,23 +72,73 @@ export function mountGhostDecorations(doc: Document): () => void {
       });
     }
     function dismiss() {
-      dismissed = true; visible = false; overlay.hidden = true;
+      swipe = null; dismissed = true; visible = false; overlay.hidden = true;
       delete editor.dataset.composerPredictionActive;
       binding.dismiss();
+    }
+    function accept() {
+      update();
+      if (!visible || !binding.accept()) return false;
+      swipe = null; dismissed = true; visible = false; overlay.hidden = true;
+      delete editor.dataset.composerPredictionActive;
+      return true;
     }
     const onKey = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
       if (event.key === "Escape" && visible) { dismiss(); return; }
       if (event.key !== "Tab" || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey || event.isComposing || event.keyCode === 229 || composing) return;
-      update();
-      if (!visible || !binding.accept()) return;
-      dismissed = true; visible = false; overlay.hidden = true;
-      delete editor.dataset.composerPredictionActive;
+      if (!accept()) return;
       event.preventDefault(); event.stopImmediatePropagation();
+    };
+    const cancelSwipe = () => { swipe = null; };
+    // A second finger may land outside this editor (for example, pinch zoom).
+    const onAdditionalTouch = (event: TouchEvent) => { if (event.touches.length > 1) cancelSwipe(); };
+    const onTouchStart = (event: TouchEvent) => {
+      const alreadyTracking = swipe !== null;
+      cancelSwipe(); update();
+      if (alreadyTracking || event.defaultPrevented || !visible || event.touches.length !== 1) return;
+      const touch = event.touches[0];
+      // Leave the browser's screen-edge navigation gesture alone.
+      if (touch.clientX < 24 || touch.clientX > win.innerWidth - 24) return;
+      swipe = { id: touch.identifier, x: touch.clientX, y: touch.clientY, startedAt: event.timeStamp, generationId: lastGeneration };
+    };
+    function displacement(event: TouchEvent, touch: Touch) {
+      if (!swipe) return null;
+      const dx = touch.clientX - swipe.x;
+      const dy = Math.abs(touch.clientY - swipe.y);
+      if (event.defaultPrevented || touch.identifier !== swipe.id || event.timeStamp - swipe.startedAt > 1000 || dx < -12 || dy > 24 || (dy > 12 && dy >= Math.abs(dx))) {
+        cancelSwipe(); return null;
+      }
+      return { dx, dy };
+    }
+    const onTouchMove = (event: TouchEvent) => {
+      update();
+      if (event.touches.length !== 1) { cancelSwipe(); return; }
+      const delta = displacement(event, event.touches[0]);
+      if (!delta || delta.dx < 12 || delta.dx < delta.dy * 2) return;
+      // Only claim a deliberate horizontal gesture. Vertical scrolling and
+      // pinch zoom keep their native behaviour; acceptance waits for release.
+      if (!event.cancelable) { cancelSwipe(); return; }
+      event.preventDefault();
+    };
+    const onTouchEnd = (event: TouchEvent) => {
+      update();
+      if (!swipe || event.touches.length !== 0 || event.changedTouches.length !== 1) { cancelSwipe(); return; }
+      const generationId = swipe.generationId;
+      const delta = displacement(event, event.changedTouches[0]);
+      cancelSwipe();
+      if (!delta || delta.dx < 48 || delta.dx < delta.dy * 2 || generationId !== lastGeneration) return;
+      if (accept() && event.cancelable) event.preventDefault();
     };
     const onCompositionStart = () => { composing = true; dismiss(); update(); };
     const onCompositionEnd = () => { composing = false; update(); };
     editor.addEventListener("keydown", onKey, true);
+    doc.addEventListener("touchstart", onAdditionalTouch, { capture: true, passive: true });
+    editor.addEventListener("touchstart", onTouchStart, { capture: true, passive: true });
+    editor.addEventListener("touchmove", onTouchMove, { capture: true, passive: false });
+    editor.addEventListener("touchend", onTouchEnd, { capture: true, passive: false });
+    editor.addEventListener("touchcancel", cancelSwipe, true);
+    editor.addEventListener("contextmenu", cancelSwipe, true);
     for (const event of ["beforeinput", "input", "paste", "drop"] as const) editor.addEventListener(event, dismiss, true);
     editor.addEventListener("compositionstart", onCompositionStart, true);
     editor.addEventListener("compositionend", onCompositionEnd, true);
@@ -95,6 +152,13 @@ export function mountGhostDecorations(doc: Document): () => void {
         resize?.disconnect(); overlay.remove(); delete editor.dataset.composerPredictionActive;
         if (positioned && parent.style.position === "relative") parent.style.position = originalPosition;
         editor.removeEventListener("keydown", onKey, true);
+        doc.removeEventListener("touchstart", onAdditionalTouch, true);
+        cancelSwipe();
+        editor.removeEventListener("touchstart", onTouchStart, true);
+        editor.removeEventListener("touchmove", onTouchMove, true);
+        editor.removeEventListener("touchend", onTouchEnd, true);
+        editor.removeEventListener("touchcancel", cancelSwipe, true);
+        editor.removeEventListener("contextmenu", cancelSwipe, true);
         for (const event of ["beforeinput", "input", "paste", "drop"] as const) editor.removeEventListener(event, dismiss, true);
         editor.removeEventListener("compositionstart", onCompositionStart, true);
         editor.removeEventListener("compositionend", onCompositionEnd, true);

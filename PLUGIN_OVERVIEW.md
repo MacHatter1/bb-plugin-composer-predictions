@@ -1,12 +1,12 @@
 After an agent replies, the next thing you type is often obvious. Composer
 Predictions reads the conversation and suggests that message as faint ghost
-text in the empty message box. Press **Tab** and it becomes an ordinary draft
-you can edit. Nothing is ever sent for you.
+text in the empty message box. Press **Tab** or swipe right and it becomes an
+ordinary draft you can edit. Nothing is ever sent for you.
 
 ## What you get
 
-- **Tab to insert.** Plain Tab fills the empty box with the suggestion and
-  focuses it. Shift+Tab keeps its usual behaviour.
+- **Tab or swipe to insert.** Plain Tab or a right swipe fills the empty box
+  with the suggestion and focuses it. Shift+Tab keeps its usual behaviour.
 - **Out of your way.** Typing, pasting or Escape hides the suggestion until
   the conversation moves on. Nothing shows while the thread is running or the
   draft has text, mentions or attachments.
@@ -23,8 +23,8 @@ you can edit. Nothing is ever sent for you.
 
 ## Safety and cost
 
-Tab only fills an empty draft through BB's public composer API, and the plugin
-never submits a message. Each prediction is one request in a hidden helper
+Tab or a right swipe only fills an empty draft through BB's public composer
+API, and the plugin never submits a message. Each prediction is one request in a hidden helper
 thread, never in your conversation, stopped and then archived as soon as its
 answer is used or the conversation moves on. Providers that support archive
 get that chat archived too. Normal provider usage applies. Once you open a

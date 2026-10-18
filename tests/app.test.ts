@@ -52,6 +52,29 @@ test("public composer integration accepts a draft without submitting and allows 
     assert.deepEqual(f.slot.inspection.composer.submits, []);
   } finally { await f.cleanup(); }
 });
+test("touch acceptance uses the public composer API without submitting", async () => {
+  const f = await fixture();
+  try {
+    await waitFor(() => assert.equal(f.visible(), true));
+    const touch = async (type: string, x: number) => {
+      const point = { identifier: 1, clientX: x, clientY: 60 };
+      const event = new dom.window.Event(type, { bubbles: true, cancelable: true });
+      Object.defineProperties(event, {
+        touches: { value: type === "touchend" ? [] : [point] },
+        changedTouches: { value: [point] },
+      });
+      await act(async () => { f.editor.dispatchEvent(event); });
+    };
+    await touch("touchstart", 80);
+    await touch("touchmove", 140);
+    assert.equal(f.slot.inspection.composer.text, "");
+    await touch("touchend", 160);
+    assert.equal(f.slot.inspection.composer.text, "Show me the diff");
+    assert.deepEqual(f.slot.inspection.composer.submits, []);
+    assert.ok(f.slot.inspection.composer.focusCount > 0);
+    await waitFor(() => assert.equal(f.visible(), false));
+  } finally { await f.cleanup(); }
+});
 test("typing and clearing before the first RPC response dismisses the arriving generation", async () => {
   let release = (_state: PredictionState) => {};
   const held = new Promise<PredictionState>(resolve => { release = resolve; });

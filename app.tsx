@@ -90,7 +90,7 @@ function PredictionBridge() {
   }, [composer.key, dismiss]);
   useEffect(() => { refreshGhost(); });
   const available = prediction?.threadId === threadId && prediction?.status === "ready" && prediction.generationId !== dismissedGeneration.current && !dismissOnArrival.current && composer.isEmpty && !composer.isRunning && !composer.isSubmitting && settings.values?.enabled !== false;
-  return <span ref={anchor} data-composer-prediction-bridge="" className="sr-only" role="status" aria-live="polite">{available ? `Suggestion available. Press Tab to insert: ${prediction.suggestion}` : ""}</span>;
+  return <span ref={anchor} data-composer-prediction-bridge="" className="sr-only" role="status" aria-live="polite">{available ? `Suggestion available. Press Tab or swipe right in the message box to insert: ${prediction.suggestion}` : ""}</span>;
 }
 
 export default definePluginApp(app => {
