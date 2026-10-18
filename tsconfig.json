@@ -28,6 +28,7 @@
     "components",
     "contract.ts",
     "lib",
-    "tests"
+    "tests",
+    "scripts"
   ]
 }

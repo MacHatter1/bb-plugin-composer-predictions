@@ -15,7 +15,19 @@ function fixture() {
     const event = new dom.window.KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...options });
     editor.dispatchEvent(event); return event;
   };
-  return { dom, doc, editor, anchor, press, accepted: () => accepted, dismissed: () => dismissed, setEligible: (value: boolean) => { eligible = value; refreshGhost(); }, setGeneration: (value: string) => { generationId = value; refreshGhost(); }, cleanup: () => { disposeBinding(); disposeScript(); dom.window.close(); } };
+  const touch = (type: string, x = 80, y = 50, options: { count?: number; id?: number; time?: number; prevented?: boolean; cancelable?: boolean } = {}) => {
+    const point = { identifier: options.id ?? 1, clientX: x, clientY: y };
+    const event = new dom.window.Event(type, { bubbles: true, cancelable: options.cancelable ?? true });
+    Object.defineProperties(event, {
+      touches: { value: Array.from({ length: options.count ?? (type === "touchend" ? 0 : 1) }, (_, i) => ({ ...point, identifier: point.identifier + i })) },
+      changedTouches: { value: [point] },
+      timeStamp: { value: options.time ?? 100 },
+    });
+    if (options.prevented) event.preventDefault();
+    editor.dispatchEvent(event); return event;
+  };
+  const dispose = () => { disposeBinding(); disposeScript(); };
+  return { dom, doc, editor, anchor, press, touch, dispose, accepted: () => accepted, dismissed: () => dismissed, setEligible: (value: boolean) => { eligible = value; refreshGhost(); }, setGeneration: (value: string) => { generationId = value; refreshGhost(); }, cleanup: () => { dispose(); dom.window.close(); } };
 }
 test("ghost is outside the editor; only plain Tab accepts, never submits", () => {
   const f = fixture(); let submitted = 0;
@@ -94,4 +106,74 @@ test("explicit regeneration can show the same words after a dismissal", () => {
   assert.equal(f.doc.querySelector<HTMLElement>("[data-composer-prediction-ghost]")!.hidden, true);
   f.setGeneration("two");
   assert.equal(f.doc.querySelector<HTMLElement>("[data-composer-prediction-ghost]")!.hidden, false); f.cleanup();
+});
+
+test("a right swipe inserts once on release without submitting", () => {
+  const f = fixture(); let submitted = 0;
+  f.doc.querySelector("form")!.addEventListener("submit", () => submitted++);
+  assert.equal(f.touch("touchstart").defaultPrevented, false);
+  assert.equal(f.touch("touchmove", 140, 55).defaultPrevented, true);
+  assert.equal(f.accepted(), 0);
+  assert.equal(f.touch("touchend", 150, 55).defaultPrevented, true);
+  assert.equal(f.accepted(), 1); assert.equal(submitted, 0);
+  assert.equal(f.editor.textContent, "Show me the diff");
+  f.touch("touchend", 150, 55); assert.equal(f.accepted(), 1);
+  f.cleanup();
+});
+
+test("taps, left swipes, vertical and diagonal scrolling are not accepted or prevented", () => {
+  for (const [x, y] of [[80, 50], [40, 50], [85, 110], [140, 110]]) {
+    const f = fixture(); f.touch("touchstart");
+    assert.equal(f.touch("touchmove", x, y).defaultPrevented, false);
+    assert.equal(f.touch("touchend", x, y).defaultPrevented, false);
+    assert.equal(f.accepted(), 0); f.cleanup();
+  }
+});
+
+test("short gestures, screen edges, long presses, pinch and cancelled gestures do not accept", () => {
+  const scenarios: ((f: ReturnType<typeof fixture>) => void)[] = [
+    f => { f.touch("touchstart"); f.touch("touchend", 110); },
+    f => { f.touch("touchstart", 10); f.touch("touchend", 100); },
+    f => { f.touch("touchstart", f.dom.window.innerWidth - 10); f.touch("touchend", f.dom.window.innerWidth + 50); },
+    f => { f.touch("touchstart", 80, 50, { time: 0 }); f.touch("touchend", 150, 50, { time: 1100 }); },
+    f => { f.touch("touchstart", 80, 50, { count: 2 }); f.touch("touchend", 150); },
+    f => { f.touch("touchstart"); f.touch("touchmove", 120, 50, { count: 2 }); f.touch("touchend", 150); },
+    f => { f.touch("touchstart"); f.touch("touchstart", 90, 50, { count: 2 }); f.touch("touchend", 150); },
+    f => {
+      f.touch("touchstart");
+      const outside = new f.dom.window.Event("touchstart", { bubbles: true });
+      Object.defineProperty(outside, "touches", { value: [{ identifier: 1 }, { identifier: 2 }] });
+      f.doc.body.dispatchEvent(outside); f.touch("touchend", 150);
+    },
+    f => { f.touch("touchstart"); f.touch("touchcancel"); f.touch("touchend", 150); },
+    f => { f.touch("touchstart"); f.editor.dispatchEvent(new f.dom.window.Event("contextmenu")); f.touch("touchend", 150); },
+    f => { f.touch("touchstart"); f.touch("touchend", 150, 50, { id: 2 }); },
+    f => { f.touch("touchstart"); f.touch("touchmove", 140, 50, { cancelable: false }); f.touch("touchend", 150); },
+    f => { f.touch("touchstart"); f.touch("touchmove", 85, 70); f.touch("touchend", 150, 50); },
+    f => { f.touch("touchstart"); f.touch("touchmove", 40, 50); f.touch("touchend", 150); },
+    f => { f.touch("touchstart", 80, 50, { prevented: true }); f.touch("touchend", 150); },
+    f => { f.touch("touchstart"); f.touch("touchend", 150, 50, { prevented: true }); },
+  ];
+  for (const scenario of scenarios) {
+    const f = fixture(); scenario(f); assert.equal(f.accepted(), 0); f.cleanup();
+  }
+});
+
+test("a swipe cannot accept a changed, hidden, read-only, composing or detached suggestion", () => {
+  const changes: ((f: ReturnType<typeof fixture>) => void)[] = [
+    f => f.setGeneration("replacement"),
+    f => f.setEligible(false),
+    f => { f.editor.textContent = "my draft"; },
+    f => f.editor.setAttribute("contenteditable", "false"),
+    f => f.editor.closest("form")!.setAttribute("data-promptbox-voice-active", ""),
+    f => { f.editor.dispatchEvent(new f.dom.window.Event("compositionstart")); },
+    f => { f.editor.dispatchEvent(new f.dom.window.Event("beforeinput")); },
+    f => { f.doc.body.append(f.anchor); refreshGhost(); },
+    f => f.dispose(),
+  ];
+  for (const change of changes) {
+    const f = fixture(); f.touch("touchstart"); change(f);
+    assert.equal(f.touch("touchend", 150).defaultPrevented, false);
+    assert.equal(f.accepted(), 0); f.cleanup();
+  }
 });

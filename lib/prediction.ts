@@ -1,11 +1,15 @@
 import { createHash } from "node:crypto";
 
-// Composer predictions remote config v5, inspected on 2026-10-16.
+// Prefer abstention to repeating work the agent already owns.
 export const PREDICTION_PROMPT = `This is an app-generated request for a suggested next user message. The user did not write this message.
 
 Your suggestion will appear in the user's empty message composer. They can accept it, edit it, or ignore it; it will not be sent automatically.
 
-Predict the single message this user is most likely to type next from the visible conversation. Use the whole conversation to understand their current intent and the latest exchange. Choose the action and specific object that best continue that intent, rather than a generally useful follow-up. Express its core naturally in the user's voice, keeping the requirements needed to retain its meaning. Choose the strongest grounded move even if several continuations are possible; uncertainty about exact wording or incidental details is not a reason to return null. Use null only when the conversation offers no grounded next move at all.
+Predict the single message this user is most likely to type next, only when the conversation supports a useful next action for the user. Use the whole conversation to understand their intent, giving particular weight to the latest user request and assistant reply. Express the action and specific object naturally in the user's voice, keeping the requirements needed to retain its meaning.
+
+Before suggesting anything, distinguish work already requested, promised, in progress, or completed from decisions or requests that still belong to the user. Do not suggest asking the agent to do work it has already agreed to do, waiting for or checking work it says is running, or repeating a completed action. An assistant progress update does not require a user reply. Return null when the user can simply wait, the task is finished, or the only continuation would be generic encouragement, acknowledgment, a status request, or invented extra scope.
+
+A specific clarification, a genuinely pending approval, or the next step of an explicitly staged user request can be useful. When the user asks what to improve or do next and the assistant recommends a concrete priority it has not started, accepting that recommendation is a grounded next move. If missing or truncated information blocks the user's stated goal, asking for that information can also be useful. Do not invent user preferences, facts, or claims that the user has already done something. If several materially different choices remain without a stated preference or a recommendation addressing the user's criteria, return null. Prefer no suggestion over a redundant or speculative one. Uncertainty about wording alone need not prevent an otherwise grounded suggestion.
 
 Set suggestion to exactly one natural user message, one line, at most 240 characters, or null. No alternatives or explanation.`;
 

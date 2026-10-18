@@ -4,10 +4,10 @@
 
 # Composer Predictions
 
-### Your next message, one Tab away.
+### Your next message, one gesture away.
 
 Suggests what you are likely to type next, as ghost text in an empty BB message box.<br>
-Press Tab to make it an editable draft. Nothing is ever sent for you.
+Press Tab or swipe right to make it an editable draft. Nothing is ever sent for you.
 
 ![Licence: MIT](https://img.shields.io/badge/licence-MIT-blue)
 ![bb ≥ 0.46](https://img.shields.io/badge/bb-%E2%89%A5%200.46-c026d3)
@@ -35,13 +35,13 @@ it out, every time.
 
 Composer Predictions reads the conversation after each reply and suggests the
 message you are most likely to send next, as faint text in the empty message
-box. Press **Tab** and it becomes an ordinary draft you can edit. Start typing
-and it gets out of the way.
+box. Press **Tab**, or swipe right inside it on a touchscreen, and it becomes
+an ordinary draft you can edit. Start typing and it gets out of the way.
 
 |  | Without Composer Predictions | With Composer Predictions |
 | --- | :---: | :---: |
 | A suggested next message after each reply | ❌ | ✅ as ghost text |
-| Insert it as an editable draft | ❌ | ✅ one Tab |
+| Insert it as an editable draft | ❌ | ✅ Tab or right swipe |
 | Choose which model predicts | — | ✅ the conversation's, or your own |
 | Remember suggestions across restarts | — | ✅ checked before showing |
 | Send anything on your behalf | — | ❌ never |
@@ -52,11 +52,13 @@ and it gets out of the way.
 <tr>
 <td width="50%" valign="top">
 
-### ⌨️ Tab to insert
+### ⌨️ Tab or swipe to insert
 
 Plain **Tab** fills the empty box with the suggestion and focuses it. It is a
 normal draft: edit it, send it, or delete it. **Shift+Tab** keeps its usual
-focus behaviour.
+focus behaviour. On a touchscreen, swipe right inside the empty message box
+to accept the visible suggestion. Vertical scrolling and pinch zoom keep their
+usual behaviour. The gesture inserts a draft only; it never sends.
 
 </td>
 <td width="50%" valign="top">
@@ -94,16 +96,16 @@ no new request.
 
 ### 🤐 Silent when unsure
 
-When the conversation offers no clear next move, the model can suggest
-nothing, and the box stays empty.
+When no useful user action is supported, the model is instructed to suggest
+nothing. It should not repeat work the agent has promised, started or finished.
 
 </td>
 <td valign="top">
 
 ### ♿ Announced to screen readers
 
-A polite live region reads out the suggestion and the Tab shortcut whenever
-one is available.
+A polite live region reads out the suggestion and its acceptance controls
+whenever one is available.
 
 </td>
 </tr>
@@ -151,7 +153,7 @@ bb plugin install path:$PWD --yes
 
 | Where | What |
 | --- | --- |
-| **The message box** in an existing thread | Ghost text with a **Tab** hint once a suggestion is ready. **Tab** inserts it; **Escape** hides it. New-thread composers are not covered. |
+| **The message box** in an existing thread | Ghost text with a **Tab** or **Swipe →** hint once a suggestion is ready. **Tab** or a right swipe inserts it; **Escape** hides it. New-thread composers are not covered. |
 | **Settings → Plugins → Composer Predictions** | The on/off switch, the conversation budget, and the **Prediction model** section. |
 
 ## How it works
@@ -175,8 +177,8 @@ sequenceDiagram
         Plugin-->>Composer: suggestion
         Plugin->>Helper: stop, then archive
     end
-    Composer-->>You: ghost text and a Tab hint
-    You->>Composer: Tab
+    Composer-->>You: ghost text and an acceptance hint
+    You->>Composer: Tab or right swipe
     Composer->>Composer: fill the empty draft, never send
 ```
 
@@ -203,8 +205,8 @@ Context limits, cache rules, key handling and compatibility are covered in
 
 ## Safety and cost
 
-- ✋ **Never sends.** Tab fills an empty draft through BB's public composer
-  API. The plugin has no call to submit a message.
+- ✋ **Never sends.** Tab or a right swipe fills an empty draft through BB's
+  public composer API. The plugin has no call to submit a message.
 - 🧾 **Never overwrites.** A suggestion is inserted only when the box has no
   text, mentions or attachments.
 - 🧵 **Leaves your thread alone.** Predictions run in separate hidden helpers,
@@ -325,10 +327,14 @@ docs/               logo, design notes, per-release review records
 
 **Tests** use `node:test` through `tsx`. Unit tests cover context building,
 strict parsing and the coordinator's cancellation, concurrency and
-stale-dismissal rules. The ghost overlay's key handling and cleanup run in
+stale-dismissal rules. The ghost overlay's keyboard and touch handling and cleanup run in
 jsdom. The composer bridge and settings section run through BB's frontend SDK
 harness, and the server, helper cleanup, model routing and reloads through its
 fake plugin host, with a real SQLite file for the cache.
+
+The optional [prompt evaluation](docs/prediction-evaluation.md) compares a
+baseline Git revision with the current prompt using labelled cases and
+independent model requests. It is separate from `npm test`.
 
 `PLUGIN_OVERVIEW.md` is the store listing. Keep it in step with
 `bb.description` in `package.json`. Review and verification records for each

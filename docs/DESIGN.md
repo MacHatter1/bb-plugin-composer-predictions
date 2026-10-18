@@ -65,8 +65,11 @@ anyway; the rest are found on the next start. A failed stop after a helper
 asks for approval or input is also only logged, and the same release archives
 it once it can be stopped. Normal provider usage and billing apply.
 
-The prediction instruction in `lib/prediction.ts` reproduces the
-composer-predictions remote config v5 inspected on 16 October 2026. A
+The prediction instruction in `lib/prediction.ts` asks for a useful next user
+action and prefers abstention over repeating work already requested, promised,
+running or completed. Pending approvals, grounded clarifications and explicitly
+staged next steps remain eligible; unknown preferences and generic follow-ups
+do not. This is a model instruction, not a deterministic relevance filter. A
 BB-specific wrapper asks for JSON matching `{"suggestion": string | null}` and
 treats the quoted conversation as data. The parser accepts exactly one
 `suggestion` field. A suggestion must be a single line of 1 to 240 characters;
@@ -147,14 +150,14 @@ protected from stale dismissals.
 
 A composer customisation, scoped to threads, adds an invisible bridge to the
 composer's banner area. The bridge holds the composer handle and a polite live
-region that announces *Suggestion available. Press Tab to insert: …* to
+region that announces *Suggestion available. Press Tab or swipe right in the message box to insert: …* to
 screen readers. A trusted content script finds the editor inside that
 bridge's own composer shell and paints an inert, theme-aware overlay beside
 the editor, outside the editor document. The overlay is clamped to one line in
 the compact composer and three lines otherwise, and it hides during voice
 input.
 
-Only a plain **Tab** received by that editor while a suggestion is visible is
+A plain **Tab** received by that editor while a suggestion is visible is
 handled. **Shift**, **Alt**, **Ctrl** or **Cmd** with Tab, a Tab the host has
 already handled, and Tab during IME composition are left alone. **Escape**,
 typing, pasting and dropping dismiss the suggestion. Acceptance calls the
@@ -162,12 +165,22 @@ public `composer.replace` and `composer.focus` APIs, and only fills a draft
 with no text, mentions or attachments. The frontend has no call to
 `composer.submit`.
 
+Touch acceptance starts inside the editor with one finger, at least 24 CSS
+pixels from either screen edge. Release within one second after moving at
+least 48 pixels right, with at most 24 pixels of vertical drift and twice as
+much horizontal as vertical movement. A leftward or vertical gesture, a second
+finger, touch cancellation, editing, or a different prediction cancels it.
+Only deliberate horizontal movement cancels native touch behaviour; vertical
+scrolling and pinch zoom are preserved. The overlay remains inert. Coarse
+primary pointers see a **Swipe →** hint; other pointers see **Tab**. The same
+acceptance path rechecks visibility and composer eligibility at release.
+
 BB has no first-class ghost-text slot yet, so placement relies on BB 0.46
 composer DOM attributes (`data-promptbox-shell`, `data-promptbox-editor-content`,
 `data-promptbox`, `data-promptbox-voice-active`). If the editor cannot be
 matched uniquely to its own bridge, the overlay is removed and Tab is not
 captured. A change to BB's composer markup may need a plugin update. Unloading
-the plugin removes overlays, key listeners, styles and observers.
+the plugin removes overlays, key and touch listeners, styles and observers.
 
 ## Review records
 

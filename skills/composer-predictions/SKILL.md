@@ -6,7 +6,7 @@ description: Inspect, regenerate, or dismiss a thread's Composer Predictions sug
 # Composer Predictions
 
 Composer Predictions suggests the user's next message as ghost text in an
-empty thread composer after an agent reply. **Tab** inserts it as an editable
+empty thread composer after an agent reply. **Tab** or a right swipe inside the message box inserts it as an editable
 draft. It never sends anything. Each prediction is one request to a hidden
 helper thread, stopped and then archived once its answer is used or the
 conversation moves on. Providers that support archive get that chat archived
@@ -54,7 +54,7 @@ few seconds later.
 - Do not run `regenerate` repeatedly. Each run is a model request at normal
   provider cost.
 - The plugin cannot send a message or write into the composer from the CLI.
-  Only the user's Tab inserts a suggestion.
+  Only the user's Tab or right swipe inserts a suggestion.
 - The prediction model is chosen in **Settings → Plugins → Composer
   Predictions → Prediction model**. Point the user there; there is no CLI for
   it.

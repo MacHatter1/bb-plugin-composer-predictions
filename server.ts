@@ -13,7 +13,7 @@ const PROMPT_KEY = sourceKey(PREDICTION_PROMPT, WORKER_INSTRUCTIONS);
 
 export default async function plugin(bb: BbPluginApi) {
   const settings = bb.settings.define({
-    enabled: { type: "boolean", label: "Composer predictions", default: true, description: "Suggest a next message in an empty composer. Tab inserts it without sending." },
+    enabled: { type: "boolean", label: "Composer predictions", default: true, description: "Suggest a next message in an empty composer. Tab or a right swipe inserts it without sending." },
     contextCharacters: { type: "number", label: "Conversation character budget", default: 48000, experimental_schema: z.number().int().min(4000).max(120000) },
   });
   let config = await settings.get();

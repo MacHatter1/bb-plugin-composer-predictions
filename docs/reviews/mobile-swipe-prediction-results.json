@@ -1,0 +1,531 @@
+{
+  "model": "gpt-6.1-sol",
+  "effort": "low",
+  "baselineSha": "1edfe95a6d2dc92ef2b825938061d8d3ec806399",
+  "baselinePromptHash": "bf64e2c1b0e11dca1a982ab95e77afc4046422b3605849fb9d9da0fdca069418",
+  "candidatePromptHash": "365ef55ce31c32d60fc0fc7472a5a3873f696cb5e271733fb335eb88b6d82913",
+  "casesHash": "804603bc3352a792b227ec023094b033c2e84b200d872ec3446ac12d727dcacd",
+  "repeats": 2,
+  "startedAt": "2026-10-18T05:38:47.588Z",
+  "results": [
+    {
+      "id": "promised-tests",
+      "variant": "baseline",
+      "repeat": 0,
+      "expected": "abstain",
+      "suggestion": "What were the test results?",
+      "passed": false
+    },
+    {
+      "id": "promised-tests",
+      "variant": "candidate",
+      "repeat": 0,
+      "expected": "abstain",
+      "suggestion": null,
+      "passed": true
+    },
+    {
+      "id": "background-checks",
+      "variant": "baseline",
+      "repeat": 0,
+      "expected": "abstain",
+      "suggestion": "Has the simulator check finished, and have you installed the verified test build?",
+      "passed": false
+    },
+    {
+      "id": "background-checks",
+      "variant": "candidate",
+      "repeat": 0,
+      "expected": "abstain",
+      "suggestion": null,
+      "passed": true
+    },
+    {
+      "id": "completed-fix",
+      "variant": "baseline",
+      "repeat": 0,
+      "expected": "abstain",
+      "suggestion": null,
+      "passed": true
+    },
+    {
+      "id": "completed-fix",
+      "variant": "candidate",
+      "repeat": 0,
+      "expected": "abstain",
+      "suggestion": null,
+      "passed": true
+    },
+    {
+      "id": "completed-install",
+      "variant": "baseline",
+      "repeat": 0,
+      "expected": "abstain",
+      "suggestion": "Check that the plugin is working correctly.",
+      "passed": false
+    },
+    {
+      "id": "completed-install",
+      "variant": "candidate",
+      "repeat": 0,
+      "expected": "abstain",
+      "suggestion": null,
+      "passed": true
+    },
+    {
+      "id": "explicit-wait",
+      "variant": "baseline",
+      "repeat": 0,
+      "expected": "abstain",
+      "suggestion": "Is the export finished yet?",
+      "passed": false
+    },
+    {
+      "id": "explicit-wait",
+      "variant": "candidate",
+      "repeat": 0,
+      "expected": "abstain",
+      "suggestion": null,
+      "passed": true
+    },
+    {
+      "id": "unknown-secret",
+      "variant": "baseline",
+      "repeat": 0,
+      "expected": "abstain",
+      "suggestion": "Where can I find the secure credential form?",
+      "passed": false
+    },
+    {
+      "id": "unknown-secret",
+      "variant": "candidate",
+      "repeat": 0,
+      "expected": "abstain",
+      "suggestion": null,
+      "passed": true
+    },
+    {
+      "id": "unknown-preference",
+      "variant": "baseline",
+      "repeat": 0,
+      "expected": "abstain",
+      "suggestion": "Let's go with the sidebar layout.",
+      "passed": false
+    },
+    {
+      "id": "unknown-preference",
+      "variant": "candidate",
+      "repeat": 0,
+      "expected": "abstain",
+      "suggestion": null,
+      "passed": true
+    },
+    {
+      "id": "already-authorized",
+      "variant": "baseline",
+      "repeat": 0,
+      "expected": "abstain",
+      "suggestion": "Have you finished implementing and verifying the reporting labels and stale-data warning against real data?",
+      "passed": false
+    },
+    {
+      "id": "already-authorized",
+      "variant": "candidate",
+      "repeat": 0,
+      "expected": "abstain",
+      "suggestion": null,
+      "passed": true
+    },
+    {
+      "id": "tests-already-passed",
+      "variant": "baseline",
+      "repeat": 0,
+      "expected": "abstain",
+      "suggestion": "Commit the fix.",
+      "passed": false
+    },
+    {
+      "id": "tests-already-passed",
+      "variant": "candidate",
+      "repeat": 0,
+      "expected": "abstain",
+      "suggestion": null,
+      "passed": true
+    },
+    {
+      "id": "unrequested-expansion",
+      "variant": "baseline",
+      "repeat": 0,
+      "expected": "abstain",
+      "suggestion": "What happens after the five minutes are up?",
+      "passed": false
+    },
+    {
+      "id": "unrequested-expansion",
+      "variant": "candidate",
+      "repeat": 0,
+      "expected": "abstain",
+      "suggestion": null,
+      "passed": true
+    },
+    {
+      "id": "pending-fix-approval",
+      "variant": "baseline",
+      "repeat": 0,
+      "expected": "suggest",
+      "suggestion": "Yes, apply the fix to use session_id.",
+      "passed": true
+    },
+    {
+      "id": "pending-fix-approval",
+      "variant": "candidate",
+      "repeat": 0,
+      "expected": "suggest",
+      "suggestion": "Yes, update the login handler to read session_id.",
+      "passed": true
+    },
+    {
+      "id": "known-queue-preference",
+      "variant": "baseline",
+      "repeat": 0,
+      "expected": "suggest",
+      "suggestion": "Let's use pg-boss. Implement it with our existing Postgres.",
+      "passed": true
+    },
+    {
+      "id": "known-queue-preference",
+      "variant": "candidate",
+      "repeat": 0,
+      "expected": "suggest",
+      "suggestion": "Implement pg-boss so we can reuse Postgres.",
+      "passed": true
+    },
+    {
+      "id": "ambiguous-report",
+      "variant": "baseline",
+      "repeat": 0,
+      "expected": "suggest",
+      "suggestion": "Can you check actual completed purchases today and compare them with a typical day to see if customers really stopped buying?",
+      "passed": true
+    },
+    {
+      "id": "ambiguous-report",
+      "variant": "candidate",
+      "repeat": 0,
+      "expected": "suggest",
+      "suggestion": "Can you check actual completed purchases today to confirm whether customers stopped buying, rather than relying on the ambiguous dashboard metric?",
+      "passed": true
+    },
+    {
+      "id": "staged-comparison",
+      "variant": "baseline",
+      "repeat": 0,
+      "expected": "suggest",
+      "suggestion": "I'll choose B.",
+      "passed": true
+    },
+    {
+      "id": "staged-comparison",
+      "variant": "candidate",
+      "repeat": 0,
+      "expected": "suggest",
+      "suggestion": "I'll go with B.",
+      "passed": true
+    },
+    {
+      "id": "known-target",
+      "variant": "baseline",
+      "repeat": 0,
+      "expected": "suggest",
+      "suggestion": "Deploy it to staging only. Leave production unchanged.",
+      "passed": true
+    },
+    {
+      "id": "known-target",
+      "variant": "candidate",
+      "repeat": 0,
+      "expected": "suggest",
+      "suggestion": "Deploy it to staging only. Leave production unchanged.",
+      "passed": true
+    },
+    {
+      "id": "unstarted-recommendation",
+      "variant": "baseline",
+      "repeat": 0,
+      "expected": "suggest",
+      "suggestion": "Go ahead and clarify the labels and add stale-data warnings. Leave event retries for later.",
+      "passed": true
+    },
+    {
+      "id": "unstarted-recommendation",
+      "variant": "candidate",
+      "repeat": 0,
+      "expected": "suggest",
+      "suggestion": "Go ahead and clarify the labels and add stale-data warnings.",
+      "passed": true
+    },
+    {
+      "id": "promised-tests",
+      "variant": "candidate",
+      "repeat": 1,
+      "expected": "abstain",
+      "suggestion": null,
+      "passed": true
+    },
+    {
+      "id": "promised-tests",
+      "variant": "baseline",
+      "repeat": 1,
+      "expected": "abstain",
+      "suggestion": "Did the tests pass?",
+      "passed": false
+    },
+    {
+      "id": "background-checks",
+      "variant": "candidate",
+      "repeat": 1,
+      "expected": "abstain",
+      "suggestion": null,
+      "passed": true
+    },
+    {
+      "id": "background-checks",
+      "variant": "baseline",
+      "repeat": 1,
+      "expected": "abstain",
+      "suggestion": "Has the simulator check finished? If the clipping fix is verified, go ahead and install the test build.",
+      "passed": false
+    },
+    {
+      "id": "completed-fix",
+      "variant": "candidate",
+      "repeat": 1,
+      "expected": "abstain",
+      "suggestion": null,
+      "passed": true
+    },
+    {
+      "id": "completed-fix",
+      "variant": "baseline",
+      "repeat": 1,
+      "expected": "abstain",
+      "suggestion": null,
+      "passed": true
+    },
+    {
+      "id": "completed-install",
+      "variant": "candidate",
+      "repeat": 1,
+      "expected": "abstain",
+      "suggestion": null,
+      "passed": true
+    },
+    {
+      "id": "completed-install",
+      "variant": "baseline",
+      "repeat": 1,
+      "expected": "abstain",
+      "suggestion": "How do I get started using the plugin?",
+      "passed": false
+    },
+    {
+      "id": "explicit-wait",
+      "variant": "candidate",
+      "repeat": 1,
+      "expected": "abstain",
+      "suggestion": null,
+      "passed": true
+    },
+    {
+      "id": "explicit-wait",
+      "variant": "baseline",
+      "repeat": 1,
+      "expected": "abstain",
+      "suggestion": "Is the export finished yet?",
+      "passed": false
+    },
+    {
+      "id": "unknown-secret",
+      "variant": "candidate",
+      "repeat": 1,
+      "expected": "abstain",
+      "suggestion": null,
+      "passed": true
+    },
+    {
+      "id": "unknown-secret",
+      "variant": "baseline",
+      "repeat": 1,
+      "expected": "abstain",
+      "suggestion": "Where can I find the secure credential form?",
+      "passed": false
+    },
+    {
+      "id": "unknown-preference",
+      "variant": "candidate",
+      "repeat": 1,
+      "expected": "abstain",
+      "suggestion": null,
+      "passed": true
+    },
+    {
+      "id": "unknown-preference",
+      "variant": "baseline",
+      "repeat": 1,
+      "expected": "abstain",
+      "error": "The operation was aborted due to timeout"
+    },
+    {
+      "id": "unknown-preference",
+      "variant": "baseline",
+      "repeat": 1,
+      "expected": "abstain",
+      "suggestion": "Let's go with the sidebar layout.",
+      "passed": false
+    },
+    {
+      "id": "already-authorized",
+      "variant": "candidate",
+      "repeat": 1,
+      "expected": "abstain",
+      "suggestion": null,
+      "passed": true
+    },
+    {
+      "id": "already-authorized",
+      "variant": "baseline",
+      "repeat": 1,
+      "expected": "abstain",
+      "suggestion": "Is the reporting update installed and verified now, including the stale-data warning?",
+      "passed": false
+    },
+    {
+      "id": "tests-already-passed",
+      "variant": "candidate",
+      "repeat": 1,
+      "expected": "abstain",
+      "suggestion": null,
+      "passed": true
+    },
+    {
+      "id": "tests-already-passed",
+      "variant": "baseline",
+      "repeat": 1,
+      "expected": "abstain",
+      "suggestion": "Show me the diff for the fix.",
+      "passed": false
+    },
+    {
+      "id": "unrequested-expansion",
+      "variant": "candidate",
+      "repeat": 1,
+      "expected": "abstain",
+      "suggestion": null,
+      "passed": true
+    },
+    {
+      "id": "unrequested-expansion",
+      "variant": "baseline",
+      "repeat": 1,
+      "expected": "abstain",
+      "suggestion": "What happens after the five minutes are up?",
+      "passed": false
+    },
+    {
+      "id": "pending-fix-approval",
+      "variant": "candidate",
+      "repeat": 1,
+      "expected": "suggest",
+      "suggestion": "Yes, apply the fix to use session_id in the login handler.",
+      "passed": true
+    },
+    {
+      "id": "pending-fix-approval",
+      "variant": "baseline",
+      "repeat": 1,
+      "expected": "suggest",
+      "suggestion": "Yes, apply the fix to use session_id.",
+      "passed": true
+    },
+    {
+      "id": "known-queue-preference",
+      "variant": "candidate",
+      "repeat": 1,
+      "expected": "suggest",
+      "suggestion": "Implement pg-boss so we can reuse our existing Postgres.",
+      "passed": true
+    },
+    {
+      "id": "known-queue-preference",
+      "variant": "baseline",
+      "repeat": 1,
+      "expected": "suggest",
+      "suggestion": "Use pg-boss with our existing Postgres. Go ahead and implement it.",
+      "passed": true
+    },
+    {
+      "id": "ambiguous-report",
+      "variant": "candidate",
+      "repeat": 1,
+      "expected": "suggest",
+      "suggestion": "Can you check actual completed purchases today, rather than visits to the orders screen, to confirm whether customers stopped buying?",
+      "passed": true
+    },
+    {
+      "id": "ambiguous-report",
+      "variant": "baseline",
+      "repeat": 1,
+      "expected": "suggest",
+      "suggestion": "Can you check actual purchase records to confirm whether customers placed any orders today?",
+      "passed": true
+    },
+    {
+      "id": "staged-comparison",
+      "variant": "candidate",
+      "repeat": 1,
+      "expected": "suggest",
+      "suggestion": "I'll go with B.",
+      "passed": true
+    },
+    {
+      "id": "staged-comparison",
+      "variant": "baseline",
+      "repeat": 1,
+      "expected": "suggest",
+      "suggestion": "I'll choose B.",
+      "passed": true
+    },
+    {
+      "id": "known-target",
+      "variant": "candidate",
+      "repeat": 1,
+      "expected": "suggest",
+      "suggestion": "Deploy it to staging only. Production must stay unchanged.",
+      "passed": true
+    },
+    {
+      "id": "known-target",
+      "variant": "baseline",
+      "repeat": 1,
+      "expected": "suggest",
+      "suggestion": "Deploy it to staging only. Leave production unchanged.",
+      "passed": true
+    },
+    {
+      "id": "unstarted-recommendation",
+      "variant": "candidate",
+      "repeat": 1,
+      "expected": "suggest",
+      "suggestion": "Go ahead and clarify the labels and add stale-data warnings.",
+      "passed": true
+    },
+    {
+      "id": "unstarted-recommendation",
+      "variant": "baseline",
+      "repeat": 1,
+      "expected": "suggest",
+      "suggestion": "Go ahead and fix the labels and add stale-data warnings. Leave event retries for later.",
+      "passed": true
+    }
+  ]
+}
