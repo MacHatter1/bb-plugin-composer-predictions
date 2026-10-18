@@ -30,9 +30,25 @@ of concrete recommendations the user requested.
 - Browser checks used the real compiled ghost decoration in an isolated
   composer-markup fixture. BB composer insertion was verified separately in
   its SDK harness. This is not a live BB installation test.
-- Physical-phone and Safari checks have not been performed.
+- The build was subsequently installed on a live BB server, and the served
+  frontend bundle was verified against the build. The user confirmed that
+  swipe acceptance works on their iPad. The browser/version was not recorded;
+  this is user-reported device verification, not a full Safari test matrix.
+- Physical-phone checks have not been performed.
+
+## Screenshots
+
+These captures show the compiled decoration in the isolated Chrome mobile
+fixture described above. They are not screenshots from the user's iPad.
+
+<img src="../screenshots/mobile-swipe-hint.jpg" width="300" alt="Touchscreen swipe hint in an empty composer">
+<img src="../screenshots/mobile-swipe-draft.jpg" width="300" alt="After a right swipe, the suggestion is an editable draft and zero messages have been sent">
 
 ## Prompt comparison
+
+**The prompt adjustments are still under testing in normal use.** The results
+below are encouraging regression checks, not proof that the wording is ready
+for every model or conversation.
 
 Both prompt versions used `gpt-6.1-sol`, `low` effort, through independent
 Responses requests with no tools. The baseline came from the upstream commit
