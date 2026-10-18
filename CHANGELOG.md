@@ -6,6 +6,28 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+## 0.4.4 - 2026-10-18
+
+### Added
+
+- Swipe right inside an empty touchscreen composer to accept the visible
+  suggestion as an editable draft. The gesture never sends a message.
+  Coarse primary pointers show a **Swipe →** hint; desktop users keep **Tab**.
+- An optional prediction prompt evaluation runner with public regression
+  fixtures and recorded results.
+
+### Changed
+
+- Prediction instructions prefer silence when work is already promised,
+  running or complete, while retaining grounded approvals, clarifications
+  and acceptance of concrete recommendations the user requested.
+
+### Thanks
+
+- Thanks to [@salemsayed](https://github.com/salemsayed) for mobile swipe
+  acceptance, prediction prompt refinements and iPad verification in
+  [#6](https://github.com/MacHatter1/bb-plugin-composer-predictions/pull/6).
+
 ## 0.4.3 - 2026-10-17
 
 ### Changed
