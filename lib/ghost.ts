@@ -17,6 +17,7 @@ export function mountGhostDecorations(doc: Document): () => void {
   const win = doc.defaultView!;
   const style = doc.createElement("style");
   style.textContent = `
+    [data-composer-prediction-swipe] { touch-action:pan-y pinch-zoom; }
     [data-composer-prediction-active] p.is-editor-empty:first-child::before { content: none !important; }
     [data-composer-prediction-ghost] { position:absolute; pointer-events:none; user-select:none; white-space:pre-wrap; overflow:hidden; color:var(--muted-foreground); opacity:.65; z-index:1; }
     [data-composer-prediction-ghost]:not([hidden]) { display:flex; align-items:baseline; }
@@ -36,6 +37,16 @@ export function mountGhostDecorations(doc: Document): () => void {
 
   function decorate(binding: GhostBinding, editor: HTMLElement): Decoration {
     const parent = editor.parentElement!;
+    // BB listens for sidebar gestures on document capture, before our editor
+    // handlers. Reserve the padded text area up front while a ghost is visible.
+    const swipeArea = editor.closest<HTMLElement>("[data-promptbox-editor-scroll]") ?? parent;
+    const originalSidebarGuard = swipeArea.getAttribute("data-no-sidebar-swipe");
+    function reserveSwipeArea(active: boolean) {
+      swipeArea.toggleAttribute("data-composer-prediction-swipe", active);
+      if (active) swipeArea.setAttribute("data-no-sidebar-swipe", originalSidebarGuard ?? "");
+      else if (originalSidebarGuard !== null) swipeArea.setAttribute("data-no-sidebar-swipe", originalSidebarGuard);
+      else swipeArea.removeAttribute("data-no-sidebar-swipe");
+    }
     const originalPosition = parent.style.position;
     const positioned = win.getComputedStyle(parent).position === "static" || !win.getComputedStyle(parent).position;
     if (positioned) parent.style.position = "relative";
@@ -58,6 +69,7 @@ export function mountGhostDecorations(doc: Document): () => void {
       const form = editor.closest("form[data-promptbox]");
       visible = state.eligible && !!state.suggestion && !composing && !dismissed && !editor.textContent?.trim() && editor.getAttribute("contenteditable") === "true" && !form?.hasAttribute("data-promptbox-voice-active");
       overlay.hidden = !visible;
+      reserveSwipeArea(visible);
       if (!visible) { swipe = null; delete editor.dataset.composerPredictionActive; return; }
       editor.dataset.composerPredictionActive = "";
       if (text.textContent !== state.suggestion) text.textContent = state.suggestion;
@@ -74,6 +86,7 @@ export function mountGhostDecorations(doc: Document): () => void {
     function dismiss() {
       swipe = null; dismissed = true; visible = false; overlay.hidden = true;
       delete editor.dataset.composerPredictionActive;
+      reserveSwipeArea(false);
       binding.dismiss();
     }
     function accept() {
@@ -81,6 +94,7 @@ export function mountGhostDecorations(doc: Document): () => void {
       if (!visible || !binding.accept()) return false;
       swipe = null; dismissed = true; visible = false; overlay.hidden = true;
       delete editor.dataset.composerPredictionActive;
+      reserveSwipeArea(false);
       return true;
     }
     const onKey = (event: KeyboardEvent) => {
@@ -97,6 +111,10 @@ export function mountGhostDecorations(doc: Document): () => void {
       const alreadyTracking = swipe !== null;
       cancelSwipe(); update();
       if (alreadyTracking || event.defaultPrevented || !visible || event.touches.length !== 1) return;
+      const target = event.target;
+      if (!(target instanceof win.Element)) return;
+      const control = target.closest("button, a, input, textarea, select, [role='button'], [role='slider'], [contenteditable]");
+      if (control && control !== editor) return;
       const touch = event.touches[0];
       // Leave the browser's screen-edge navigation gesture alone.
       if (touch.clientX < 24 || touch.clientX > win.innerWidth - 24) return;
@@ -118,8 +136,9 @@ export function mountGhostDecorations(doc: Document): () => void {
       if (!delta || delta.dx < 12 || delta.dx < delta.dy * 2) return;
       // Only claim a deliberate horizontal gesture. Vertical scrolling and
       // pinch zoom keep their native behaviour; acceptance waits for release.
-      if (!event.cancelable) { cancelSwipe(); return; }
-      event.preventDefault();
+      // With touch-action: pan-y, browsers can send non-cancelable horizontal
+      // moves because there is no native horizontal pan left to prevent.
+      if (event.cancelable) event.preventDefault();
     };
     const onTouchEnd = (event: TouchEvent) => {
       update();
@@ -134,11 +153,11 @@ export function mountGhostDecorations(doc: Document): () => void {
     const onCompositionEnd = () => { composing = false; update(); };
     editor.addEventListener("keydown", onKey, true);
     doc.addEventListener("touchstart", onAdditionalTouch, { capture: true, passive: true });
-    editor.addEventListener("touchstart", onTouchStart, { capture: true, passive: true });
-    editor.addEventListener("touchmove", onTouchMove, { capture: true, passive: false });
-    editor.addEventListener("touchend", onTouchEnd, { capture: true, passive: false });
-    editor.addEventListener("touchcancel", cancelSwipe, true);
-    editor.addEventListener("contextmenu", cancelSwipe, true);
+    swipeArea.addEventListener("touchstart", onTouchStart, { capture: true, passive: true });
+    swipeArea.addEventListener("touchmove", onTouchMove, { capture: true, passive: false });
+    swipeArea.addEventListener("touchend", onTouchEnd, { capture: true, passive: false });
+    swipeArea.addEventListener("touchcancel", cancelSwipe, true);
+    swipeArea.addEventListener("contextmenu", cancelSwipe, true);
     for (const event of ["beforeinput", "input", "paste", "drop"] as const) editor.addEventListener(event, dismiss, true);
     editor.addEventListener("compositionstart", onCompositionStart, true);
     editor.addEventListener("compositionend", onCompositionEnd, true);
@@ -149,16 +168,17 @@ export function mountGhostDecorations(doc: Document): () => void {
     return {
       editor, update,
       dispose() {
+        reserveSwipeArea(false);
         resize?.disconnect(); overlay.remove(); delete editor.dataset.composerPredictionActive;
         if (positioned && parent.style.position === "relative") parent.style.position = originalPosition;
         editor.removeEventListener("keydown", onKey, true);
         doc.removeEventListener("touchstart", onAdditionalTouch, true);
         cancelSwipe();
-        editor.removeEventListener("touchstart", onTouchStart, true);
-        editor.removeEventListener("touchmove", onTouchMove, true);
-        editor.removeEventListener("touchend", onTouchEnd, true);
-        editor.removeEventListener("touchcancel", cancelSwipe, true);
-        editor.removeEventListener("contextmenu", cancelSwipe, true);
+        swipeArea.removeEventListener("touchstart", onTouchStart, true);
+        swipeArea.removeEventListener("touchmove", onTouchMove, true);
+        swipeArea.removeEventListener("touchend", onTouchEnd, true);
+        swipeArea.removeEventListener("touchcancel", cancelSwipe, true);
+        swipeArea.removeEventListener("contextmenu", cancelSwipe, true);
         for (const event of ["beforeinput", "input", "paste", "drop"] as const) editor.removeEventListener(event, dismiss, true);
         editor.removeEventListener("compositionstart", onCompositionStart, true);
         editor.removeEventListener("compositionend", onCompositionEnd, true);
