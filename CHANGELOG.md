@@ -6,6 +6,13 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+### Fixed
+
+- The prediction model chooser tries each available provider that supports
+  predictions, so an unavailable or failing default provider does not block
+  other models. Catalogue failures appear in settings and plugin logs, and
+  Retry refreshes discovery without changing the saved prediction model.
+
 ## 0.4.4 - 2026-10-18
 
 ### Added

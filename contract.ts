@@ -16,7 +16,7 @@ export const modelSelectionSchema = z.object({
   serviceTier: z.string().trim().min(1).max(100).optional(),
 }).strict();
 export type ModelSelection = z.infer<typeof modelSelectionSchema>;
-const modelSettingsSchema = z.object({ selection: modelSelectionSchema.nullable(), pickerDefault: modelSelectionSchema.nullable() });
+const modelSettingsSchema = z.object({ selection: modelSelectionSchema.nullable(), pickerDefault: modelSelectionSchema.nullable(), catalogError: z.string().nullable() });
 export type ModelSettings = z.infer<typeof modelSettingsSchema>;
 const target = z.object({ threadId: z.string().min(1) });
 export const rpcContract = defineRpcContract({

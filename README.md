@@ -291,6 +291,12 @@ config`. **Choose a separate model** opens BB's provider and model picker, and
 goes back to the default. Changing a setting or the prediction model clears
 saved predictions, without touching any draft.
 
+The chooser tries available providers in order and uses the first usable
+model, preferring that provider's default. Failed catalogues are reported in
+settings and `bb plugin logs composer-predictions`, even when another provider
+works. **Retry** refreshes discovery. A fallback is only a picker default;
+it becomes your prediction model when you explicitly save it.
+
 </details>
 
 <details>
