@@ -41,6 +41,9 @@ export default async function plugin(bb: BbPluginApi) {
     if (modes?.includes("accept-edits")) return "accept-edits";
     throw new Error("This prediction provider cannot approve automatically or ask you for approval.");
   }
+  function usablePredictionProvider(provider: Catalog["providers"][number]): boolean {
+    return provider.available && provider.capabilities.permissionModes.some(mode => mode === "auto" || mode === "accept-edits");
+  }
   function resolveModel(catalog: Catalog, preferred: ModelSelection): ModelSelection {
     const provider = catalog.providers.find(row => row.id === preferred.providerId);
     if (!provider) throw new Error(`Prediction model ${preferred.model} is unavailable for ${preferred.providerId} on this machine.`);
@@ -54,14 +57,37 @@ export default async function plugin(bb: BbPluginApi) {
       ...(preferred.serviceTier && model.supportedServiceTiers?.length ? { serviceTier: preferred.serviceTier } : {}) });
   }
   async function readModelSettings(): Promise<ModelSettings> {
-    if (modelSelection) return { selection: modelSelection, pickerDefault: modelSelection };
+    if (modelSelection) return { selection: modelSelection, pickerDefault: modelSelection, catalogError: null };
+    let pickerDefault: ModelSelection | null = null;
+    const errors: string[] = [];
+    const report = (message: string) => { errors.push(message); bb.log.warn(`Prediction model catalog: ${message}`); };
     try {
-      const options = await bb.sdk.system.executionOptions();
-      const model = options.models.find(row => row.isDefault) ?? options.models[0];
-      const providerId = model?.routeProviderId ?? options.providers.find(row => row.available)?.id;
-      const seed = model && providerId ? modelSelectionSchema.safeParse({ providerId, model: model.model, reasoningLevel: model.defaultReasoningEffort }) : null;
-      return { selection: null, pickerDefault: seed?.success ? seed.data : null };
-    } catch { return { selection: null, pickerDefault: null }; }
+      const providers = await bb.sdk.providers.list();
+      for (const provider of providers) {
+        if (!usablePredictionProvider(provider)) continue;
+        try {
+          // An unscoped execution-options lookup loads only the first provider's
+          // models. Ask each usable provider explicitly so it cannot block the rest.
+          const catalog = await bb.sdk.providers.models({ providerId: provider.id });
+          if (catalog.modelLoadError) {
+            const failure = catalog.modelLoadError;
+            report(`${provider.id}: ${failure.code}${failure.detail ? `: ${failure.detail}` : ""}`);
+            continue;
+          }
+          const models = [...catalog.models].sort((a, b) => Number(b.isDefault) - Number(a.isDefault));
+          for (const model of models) {
+            const providerId = model.routeProviderId ?? provider.id;
+            if (!catalog.providers.some(row => row.id === providerId && usablePredictionProvider(row))) continue;
+            const seed = modelSelectionSchema.safeParse({ providerId, model: model.model, reasoningLevel: model.defaultReasoningEffort });
+            if (seed.success) { pickerDefault = seed.data; break; }
+          }
+          if (pickerDefault) break;
+          report(`${provider.id}: No usable prediction models were returned.`);
+        } catch (error) { report(`${provider.id}: ${error instanceof Error ? error.message : String(error)}`); }
+      }
+    } catch (error) { report(`Could not list prediction providers: ${error instanceof Error ? error.message : String(error)}`); }
+    if (!pickerDefault && errors.length === 0) report("No available prediction provider supports automatic approval or approval prompts on this machine.");
+    return { selection: null, pickerDefault, catalogError: errors.join("\n") || null };
   }
   function changeModel(next: ModelSelection | null): Promise<ModelSettings> {
     const result = modelWrite.then(async () => {

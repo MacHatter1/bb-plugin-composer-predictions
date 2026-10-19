@@ -25,8 +25,10 @@ function fixture(options: { pendingInteraction?: boolean; abandoned?: boolean } 
       archive: async ({ threadId }) => { operations.push(`archive:${threadId}`); return { ok: true }; },
       stop: async ({ threadId }) => { operations.push(`stop:${threadId}`); return { ok: true }; },
     },
-    providers: { models: async () => ({ providers: [{ id: "codex", capabilities: { permissionModes: ["auto"] } }], models: [{ id: "model", model: "model", defaultReasoningEffort: "low", supportedReasoningEfforts: [{ reasoningEffort: "low" }] }] }) },
-    system: { executionOptions: async () => ({ providers: [{ id: "codex", available: true }], models: [{ model: "model", routeProviderId: "codex", defaultReasoningEffort: "low", isDefault: true }] }) },
+    providers: {
+      list: async () => [{ id: "codex", available: true, capabilities: { permissionModes: ["auto"] } }],
+      models: async () => ({ providers: [{ id: "codex", available: true, capabilities: { permissionModes: ["auto"] } }], models: [{ id: "model", model: "model", defaultReasoningEffort: "low", supportedReasoningEfforts: [{ reasoningEffort: "low" }] }] }),
+    },
   } });
   return { ...host, operations };
 }
@@ -215,6 +217,107 @@ test("ordinary threads get the bundled skill; marked helpers get no skills, only
   } finally { await harness.lifecycle.dispose(); }
 });
 
+const pickerProviders = [
+  { id: "codex", available: true, capabilities: { permissionModes: ["auto"] } },
+  { id: "claude-code", available: true, capabilities: { permissionModes: ["accept-edits", "full"] } },
+];
+const pickerCatalog = {
+  providers: pickerProviders,
+  models: [{ id: "claude-model", model: "claude-model", defaultReasoningEffort: "high", supportedReasoningEfforts: [{ reasoningEffort: "high" }], isDefault: true }],
+  modelLoadError: null,
+};
+const pickerModel = { providerId: "claude-code", model: "claude-model", reasoningLevel: "high" };
+test("settings model discovery skips unavailable and full-access-only providers", async () => {
+  const { bb, harness } = fixture();
+  harness.sdk.stub("providers.list", async () => [
+    { ...pickerProviders[0], available: false },
+    { id: "full-only", available: true, capabilities: { permissionModes: ["full"] } },
+    pickerProviders[1],
+  ]);
+  harness.sdk.stub("providers.models", async () => pickerCatalog);
+  try {
+    await plugin(bb);
+    const settings = await harness.behavior.callRpc("model_get", {}) as ModelSettings;
+    assert.deepEqual(settings, { selection: null, pickerDefault: pickerModel, catalogError: null });
+    assert.deepEqual(harness.inspection.sdk.callsTo("providers.models"), [[{ providerId: "claude-code" }]]);
+  } finally { await harness.lifecycle.dispose(); }
+});
+for (const failure of ["structured", "empty", "throws"] as const) {
+  test(`settings model discovery falls back after catalog failure (${failure}) and reports its cause`, async () => {
+    const { bb, harness } = fixture();
+    harness.sdk.stub("providers.list", async () => pickerProviders);
+    harness.sdk.stub("providers.models", async ({ providerId }) => {
+      if (providerId === "claude-code") return pickerCatalog;
+      if (failure === "throws") throw new Error("catalog request failed");
+      return { providers: pickerProviders, models: [], modelLoadError: failure === "structured"
+        ? { providerId: "codex", code: "timeout", detail: "catalog request timed out" } : null };
+    });
+    try {
+      await plugin(bb);
+      const settings = await harness.behavior.callRpc("model_get", {}) as ModelSettings;
+      assert.deepEqual(settings.pickerDefault, pickerModel);
+      assert.equal(settings.selection, null, "a picker default must not change the saved prediction model");
+      assert.match(settings.catalogError!, /codex/);
+      assert.match(settings.catalogError!, failure === "structured" ? /timeout.*catalog request timed out/ : failure === "throws" ? /catalog request failed/ : /no usable.*models/i);
+      assert.ok(warned(harness, settings.catalogError!));
+      assert.deepEqual(harness.inspection.sdk.callsTo("providers.models"), [[{ providerId: "codex" }], [{ providerId: "claude-code" }]]);
+    } finally { await harness.lifecycle.dispose(); }
+  });
+}
+test("settings model discovery tries valid models in default-first order", async () => {
+  const { bb, harness } = fixture();
+  harness.sdk.stub("providers.list", async () => [pickerProviders[1]]);
+  const valid = pickerCatalog.models[0];
+  harness.sdk.stub("providers.models", async () => ({ ...pickerCatalog, models: [
+    { ...valid, model: "non-default", isDefault: false },
+    { ...valid, model: "invalid-default", defaultReasoningEffort: "" },
+    { ...valid, model: "unavailable-route", routeProviderId: "missing-provider" },
+    valid,
+  ] }));
+  try {
+    await plugin(bb);
+    assert.deepEqual((await harness.behavior.callRpc("model_get", {}) as ModelSettings).pickerDefault, pickerModel);
+  } finally { await harness.lifecycle.dispose(); }
+});
+test("settings model discovery reports listing failures and retry clears recovered errors", async () => {
+  const { bb, harness } = fixture();
+  harness.sdk.stub("providers.list", async () => { throw new Error("host disconnected"); });
+  try {
+    await plugin(bb);
+    const failed = await harness.behavior.callRpc("model_get", {}) as ModelSettings;
+    assert.equal(failed.pickerDefault, null);
+    assert.match(failed.catalogError!, /host disconnected/);
+    assert.ok(warned(harness, "host disconnected"));
+    harness.sdk.stub("providers.list", async () => [pickerProviders[1]]);
+    harness.sdk.stub("providers.models", async () => pickerCatalog);
+    assert.deepEqual(await harness.behavior.callRpc("model_get", {}), { selection: null, pickerDefault: pickerModel, catalogError: null });
+  } finally { await harness.lifecycle.dispose(); }
+});
+test("settings model discovery returns all provider failures when none can supply a model", async () => {
+  const { bb, harness } = fixture();
+  harness.sdk.stub("providers.list", async () => pickerProviders);
+  harness.sdk.stub("providers.models", async ({ providerId }) => ({ providers: pickerProviders, models: [], modelLoadError: { providerId, code: "auth_required", detail: "Sign in again" } }));
+  try {
+    await plugin(bb);
+    const settings = await harness.behavior.callRpc("model_get", {}) as ModelSettings;
+    assert.equal(settings.pickerDefault, null);
+    assert.match(settings.catalogError!, /codex.*auth_required.*Sign in again/);
+    assert.match(settings.catalogError!, /claude-code.*auth_required.*Sign in again/);
+    assert.ok(warned(harness, "codex")); assert.ok(warned(harness, "claude-code"));
+  } finally { await harness.lifecycle.dispose(); }
+});
+test("settings model discovery explains when no available provider supports predictions", async () => {
+  const { bb, harness } = fixture();
+  harness.sdk.stub("providers.list", async () => []);
+  try {
+    await plugin(bb);
+    const settings = await harness.behavior.callRpc("model_get", {}) as ModelSettings;
+    assert.equal(settings.pickerDefault, null);
+    assert.match(settings.catalogError!, /no available prediction provider/i);
+    assert.equal(harness.inspection.sdk.callsTo("providers.models").length, 0);
+  } finally { await harness.lifecycle.dispose(); }
+});
+
 const customModel = { providerId: "other", model: "prediction-model", reasoningLevel: "medium", serviceTier: "fast" };
 const customCatalog = { providers: [{ id: "other", capabilities: { permissionModes: ["auto"] } }], models: [{ id: "prediction-alias", model: "prediction-model", defaultReasoningEffort: "low", supportedReasoningEfforts: [{ reasoningEffort: "low" }], supportedServiceTiers: [{ id: "fast", label: "Fast" }] }] };
 test("separate prediction model persists across reload, routes through the source environment, and resets", async () => {
@@ -235,9 +338,12 @@ test("separate prediction model persists across reload, routes through the sourc
     assert.equal(harness.inspection.sdk.callsTo("threads.defaultExecutionOptions").length, 0);
     assert.deepEqual(harness.inspection.sdk.callsTo("providers.models").at(-1)![0], { providerId: "other", environmentId: "environment", signal: (harness.inspection.sdk.callsTo("providers.models").at(-1)![0] as { signal: AbortSignal }).signal });
     currentHarness = (await harness.lifecycle.reload(plugin)).harness;
+    const discoveryCalls = currentHarness.inspection.sdk.callsTo("providers.list").length;
     assert.deepEqual((await currentHarness.behavior.callRpc("model_get", {}) as ModelSettings).selection, saved.selection);
-    assert.equal((await currentHarness.behavior.callRpc("model_clear", {}) as ModelSettings).selection, null);
-    currentHarness.sdk.stub("providers.models", async () => ({ providers: [{ id: "codex", capabilities: { permissionModes: ["auto"] } }], models: [{ id: "model", model: "model", defaultReasoningEffort: "low", supportedReasoningEfforts: [{ reasoningEffort: "low" }] }] }));
+    assert.equal(currentHarness.inspection.sdk.callsTo("providers.list").length, discoveryCalls, "saved choices do not need discovery or a fallback");
+    currentHarness.sdk.stub("providers.models", async () => ({ providers: [{ id: "codex", available: true, capabilities: { permissionModes: ["auto"] } }], models: [{ id: "model", model: "model", defaultReasoningEffort: "low", supportedReasoningEfforts: [{ reasoningEffort: "low" }] }] }));
+    const cleared = await currentHarness.behavior.callRpc("model_clear", {}) as ModelSettings;
+    assert.equal(cleared.selection, null); assert.equal(cleared.pickerDefault?.model, "model"); assert.equal(cleared.catalogError, null);
     await currentHarness.behavior.callRpc("ensure", { threadId: "source" });
     assert.equal((await untilSettled(currentHarness)).model, "model");
   } finally { await currentHarness.lifecycle.dispose(); }

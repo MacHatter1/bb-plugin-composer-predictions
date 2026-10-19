@@ -3,8 +3,10 @@ import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 import { act, fireEvent, waitFor } from "@testing-library/react";
 import { loadPluginApp, mountPluginContentScripts, renderSlot } from "@get-bb/plugin-sdk/testing/app";
+import { createFakePluginHost } from "@get-bb/plugin-sdk/testing";
 import type { ModelSelection, ModelSettings, PredictionState } from "../contract.ts";
 import { refreshGhost } from "../lib/ghost.ts";
+import plugin from "../server.ts";
 
 const dom = new JSDOM("<!doctype html><html><head></head><body></body></html>", { pretendToBeVisual: true });
 for (const name of ["window", "document", "navigator", "HTMLElement", "MutationObserver"] as const) {
@@ -97,7 +99,7 @@ test("settings picker saves a separate model, reports failures, and restores con
   const seed: ModelSelection = { providerId: "codex", model: "prediction-model", reasoningLevel: "low" };
   let saved: ModelSelection | null = null;
   let failSave = true;
-  const current = (): ModelSettings => ({ selection: saved, pickerDefault: saved ?? seed });
+  const current = (): ModelSettings => ({ selection: saved, pickerDefault: saved ?? seed, catalogError: null });
   const slot = renderSlot(app.settingsSections[0]!, {}, { rpc: {
     model_get: current,
     model_set(input: unknown) { if (failSave) throw new Error("Provider is offline"); saved = input as ModelSelection; return current(); },
@@ -118,6 +120,60 @@ test("settings picker saves a separate model, reports failures, and restores con
     await slot.findByText("Using each conversation’s model."); assert.equal(saved, null);
     assert.deepEqual(slot.inspection.composer.submits, []);
   } finally { slot.lifecycle.unmount(); }
+});
+const settingsProvider = { id: "claude-code", available: true, capabilities: { permissionModes: ["accept-edits", "full"] } };
+const settingsCatalog = {
+  providers: [settingsProvider],
+  models: [{ id: "claude-model", model: "claude-model", defaultReasoningEffort: "high", supportedReasoningEfforts: [{ reasoningEffort: "high" }], isDefault: true }],
+  modelLoadError: null,
+};
+test("settings surfaces a catalog error from the server and Retry restores the chooser", async () => {
+  let recovered = false;
+  const { bb, harness } = createFakePluginHost({ pluginId: "composer-predictions", sdk: {
+    threads: { list: async () => [] },
+    providers: {
+      list: async () => [settingsProvider],
+      models: async () => recovered ? settingsCatalog : { ...settingsCatalog, models: [], modelLoadError: { providerId: "claude-code", code: "auth_required", detail: "Sign in again" } },
+    },
+  } });
+  await plugin(bb);
+  const slot = renderSlot(app.settingsSections[0]!, {}, { rpc: { model_get: () => harness.behavior.callRpc("model_get", {}) } });
+  try {
+    assert.match((await slot.findByRole("alert")).textContent!, /claude-code.*auth_required.*Sign in again/);
+    assert.equal((slot.getByRole("button", { name: "Choose a separate model" }) as HTMLButtonElement).disabled, true);
+    recovered = true;
+    await act(async () => { fireEvent.click(slot.getByRole("button", { name: "Retry" })); });
+    await waitFor(() => assert.equal((slot.getByRole("button", { name: "Choose a separate model" }) as HTMLButtonElement).disabled, false));
+    assert.equal(slot.queryByRole("alert"), null);
+  } finally { slot.lifecycle.unmount(); await harness.lifecycle.dispose(); }
+});
+test("settings keeps a fallback usable while showing the failed provider and saves only on request", async () => {
+  const failedProvider = { ...settingsProvider, id: "codex" };
+  const { bb, harness } = createFakePluginHost({ pluginId: "composer-predictions", sdk: {
+    threads: { list: async () => [] },
+    providers: {
+      list: async () => [failedProvider, settingsProvider],
+      models: async ({ providerId } = {}) => {
+        if (providerId === "codex") throw new Error("catalog request failed");
+        return settingsCatalog;
+      },
+    },
+  } });
+  await plugin(bb);
+  const slot = renderSlot(app.settingsSections[0]!, {}, { rpc: {
+    model_get: () => harness.behavior.callRpc("model_get", {}),
+    model_set: input => harness.behavior.callRpc("model_set", input),
+  } });
+  try {
+    assert.match((await slot.findByRole("alert")).textContent!, /codex.*catalog request failed/);
+    assert.equal((slot.getByRole("button", { name: "Choose a separate model" }) as HTMLButtonElement).disabled, false);
+    assert.equal((await harness.behavior.callRpc("model_get", {}) as ModelSettings).selection, null);
+    await act(async () => { fireEvent.click(slot.getByRole("button", { name: "Choose a separate model" })); });
+    await act(async () => { fireEvent.click(slot.getByRole("button", { name: "Save prediction model" })); });
+    await slot.findByText("Using a separate model for predictions.");
+    assert.deepEqual((await harness.behavior.callRpc("model_get", {}) as ModelSettings).selection, { providerId: "claude-code", model: "claude-model", reasoningLevel: "high" });
+    assert.equal(slot.queryByRole("alert"), null);
+  } finally { slot.lifecycle.unmount(); await harness.lifecycle.dispose(); }
 });
 test("a model change refreshes only an empty idle composer", async () => {
   const f = await fixture();

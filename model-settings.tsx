@@ -41,6 +41,7 @@ export function ModelSettingsSection() {
   }
   const configured = !!settings?.selection;
   const unsaved = choosing && JSON.stringify(draft) !== JSON.stringify(settings?.selection);
+  const visibleError = error ?? settings?.catalogError;
   return <div className="space-y-3 text-sm">
     <p role="status" className="text-muted-foreground">{loading ? "Loading prediction model…" : saving ? "Saving prediction model…" : configured ? "Using a separate model for predictions." : "Using each conversation’s model."}</p>
     {choosing && draft ? <div className="space-y-3">
@@ -54,8 +55,8 @@ export function ModelSettingsSection() {
         {unsaved && !saving ? <span className="text-xs text-muted-foreground">Unsaved changes</span> : null}
       </div>
     </div> : !loading ? <Button type="button" variant="outline" size="sm" disabled={!draft || saving} onClick={() => setChoosing(true)}>Choose a separate model</Button> : null}
-    {!loading && !draft ? <div className="flex items-center gap-2"><span className="text-muted-foreground">The model catalog is unavailable.</span><Button type="button" variant="outline" size="sm" onClick={load} disabled={saving}>Retry</Button></div> : null}
-    {error ? <p role="alert" className="text-destructive">{error}</p> : null}
+    {!loading && (!draft || settings?.catalogError) ? <div className="flex items-center gap-2">{!draft ? <span className="text-muted-foreground">The model catalog is unavailable.</span> : null}<Button type="button" variant="outline" size="sm" onClick={load} disabled={saving}>Retry</Button></div> : null}
+    {visibleError ? <p role="alert" className="whitespace-pre-line text-destructive">{visibleError}</p> : null}
     <p className="text-xs text-muted-foreground">Saved choices apply to predictions only. The selected provider and model must be available on the conversation’s machine.</p>
   </div>;
 }
