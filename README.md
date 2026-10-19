@@ -57,8 +57,10 @@ an ordinary draft you can edit. Start typing and it gets out of the way.
 Plain **Tab** fills the empty box with the suggestion and focuses it. It is a
 normal draft: edit it, send it, or delete it. **Shift+Tab** keeps its usual
 focus behaviour. On a touchscreen, swipe right inside the empty message box
-to accept the visible suggestion. Vertical scrolling and pinch zoom keep their
-usual behaviour. The gesture inserts a draft only; it never sends.
+to accept the visible suggestion, including the padding around the text. While
+a suggestion is visible, that text area is reserved for autocomplete instead
+of BB’s sidebar gesture. Vertical scrolling and pinch zoom keep their usual
+behaviour. The gesture inserts a draft only; it never sends.
 
 </td>
 <td width="50%" valign="top">

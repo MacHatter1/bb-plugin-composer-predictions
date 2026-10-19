@@ -3,11 +3,13 @@ import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 import { mountGhostDecorations, refreshGhost, registerGhost } from "../lib/ghost.ts";
 
-function fixture() {
-  const dom = new JSDOM(`<!doctype html><html><head></head><body><div data-promptbox-shell><span id="bridge"></span><form data-promptbox><div data-promptbox-editor-content><div contenteditable="true"><p class="is-editor-empty"><br></p></div></div></form></div></body></html>`, { pretendToBeVisual: true });
+function fixture(sidebarGuard?: string) {
+  const dom = new JSDOM(`<!doctype html><html><head></head><body><div data-promptbox-shell><span id="bridge"></span><form data-promptbox><div data-promptbox-editor-scroll><div data-promptbox-editor-content><div contenteditable="true"><p class="is-editor-empty"><br></p></div></div></div><button type="button">Send</button></form></div></body></html>`, { pretendToBeVisual: true });
   const doc = dom.window.document;
   const editor = doc.querySelector<HTMLElement>("[contenteditable]")!;
   const anchor = doc.getElementById("bridge")!;
+  const swipeArea = doc.querySelector<HTMLElement>("[data-promptbox-editor-scroll]")!;
+  if (sidebarGuard !== undefined) swipeArea.setAttribute("data-no-sidebar-swipe", sidebarGuard);
   let accepted = 0; let dismissed = 0; let eligible = true; let generationId = "one";
   const disposeScript = mountGhostDecorations(doc);
   const disposeBinding = registerGhost({ anchor, snapshot: () => ({ suggestion: "Show me the diff", generationId, eligible, compact: false }), accept: () => { accepted++; editor.textContent = "Show me the diff"; return true; }, dismiss: () => { dismissed++; eligible = false; } });
@@ -15,7 +17,7 @@ function fixture() {
     const event = new dom.window.KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...options });
     editor.dispatchEvent(event); return event;
   };
-  const touch = (type: string, x = 80, y = 50, options: { count?: number; id?: number; time?: number; prevented?: boolean; cancelable?: boolean } = {}) => {
+  const touch = (type: string, x = 80, y = 50, options: { count?: number; id?: number; time?: number; prevented?: boolean; cancelable?: boolean; target?: HTMLElement } = {}) => {
     const point = { identifier: options.id ?? 1, clientX: x, clientY: y };
     const event = new dom.window.Event(type, { bubbles: true, cancelable: options.cancelable ?? true });
     Object.defineProperties(event, {
@@ -24,10 +26,10 @@ function fixture() {
       timeStamp: { value: options.time ?? 100 },
     });
     if (options.prevented) event.preventDefault();
-    editor.dispatchEvent(event); return event;
+    (options.target ?? editor).dispatchEvent(event); return event;
   };
   const dispose = () => { disposeBinding(); disposeScript(); };
-  return { dom, doc, editor, anchor, press, touch, dispose, accepted: () => accepted, dismissed: () => dismissed, setEligible: (value: boolean) => { eligible = value; refreshGhost(); }, setGeneration: (value: string) => { generationId = value; refreshGhost(); }, cleanup: () => { dispose(); dom.window.close(); } };
+  return { dom, doc, editor, anchor, swipeArea, press, touch, dispose, accepted: () => accepted, dismissed: () => dismissed, setEligible: (value: boolean) => { eligible = value; refreshGhost(); }, setGeneration: (value: string) => { generationId = value; refreshGhost(); }, cleanup: () => { dispose(); dom.window.close(); } };
 }
 test("ghost is outside the editor; only plain Tab accepts, never submits", () => {
   const f = fixture(); let submitted = 0;
@@ -62,7 +64,7 @@ test("Escape dismisses without trapping focus and cleanup restores editor stylin
 test("bridge targets only its own composer, regardless of pane order", () => {
   const f = fixture();
   const other = f.doc.createElement("div"); other.setAttribute("data-promptbox-shell", "");
-  other.innerHTML = '<form data-promptbox><div data-promptbox-editor-content><div contenteditable="true"></div></div></form>';
+  other.innerHTML = '<form data-promptbox><div data-promptbox-editor-scroll><div data-promptbox-editor-content><div contenteditable="true"></div></div></div></form>';
   f.doc.body.prepend(other); refreshGhost();
   const editor = other.querySelector("[contenteditable]")!;
   const event = new f.dom.window.KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }); editor.dispatchEvent(event);
@@ -148,7 +150,6 @@ test("short gestures, screen edges, long presses, pinch and cancelled gestures d
     f => { f.touch("touchstart"); f.touch("touchcancel"); f.touch("touchend", 150); },
     f => { f.touch("touchstart"); f.editor.dispatchEvent(new f.dom.window.Event("contextmenu")); f.touch("touchend", 150); },
     f => { f.touch("touchstart"); f.touch("touchend", 150, 50, { id: 2 }); },
-    f => { f.touch("touchstart"); f.touch("touchmove", 140, 50, { cancelable: false }); f.touch("touchend", 150); },
     f => { f.touch("touchstart"); f.touch("touchmove", 85, 70); f.touch("touchend", 150, 50); },
     f => { f.touch("touchstart"); f.touch("touchmove", 40, 50); f.touch("touchend", 150); },
     f => { f.touch("touchstart", 80, 50, { prevented: true }); f.touch("touchend", 150); },
@@ -176,4 +177,61 @@ test("a swipe cannot accept a changed, hidden, read-only, composing or detached 
     assert.equal(f.touch("touchend", 150).defaultPrevented, false);
     assert.equal(f.accepted(), 0); f.cleanup();
   }
+});
+
+// BB's sidebar checks these exclusions during document capture for both event
+// families, so stopping propagation in an editor handler would be too late.
+test("padded text area reserves touch and pointer gestures before sidebar capture", () => {
+  const f = fixture(); let sidebarStarts = 0;
+  const startSidebar = (event: Event) => {
+    if (!(event.target as Element).closest('[contenteditable="true"], [data-no-sidebar-swipe]')) sidebarStarts++;
+  };
+  f.doc.addEventListener("touchstart", startSidebar, true);
+  f.doc.addEventListener("pointerdown", startSidebar, true);
+  f.swipeArea.dispatchEvent(new f.dom.window.Event("pointerdown", { bubbles: true }));
+  f.touch("touchstart", 80, 50, { target: f.swipeArea });
+  f.touch("touchmove", 140, 55, { target: f.swipeArea });
+  f.touch("touchend", 150, 55, { target: f.swipeArea });
+  assert.equal(sidebarStarts, 0); assert.equal(f.accepted(), 1);
+  assert.equal(f.swipeArea.hasAttribute("data-no-sidebar-swipe"), false);
+  f.touch("touchstart", 80, 50, { target: f.doc.body });
+  assert.equal(sidebarStarts, 1); f.cleanup();
+});
+
+test("padding preserves vertical scrolling and controls do not accept", () => {
+  const f = fixture();
+  f.touch("touchstart", 80, 50, { target: f.swipeArea });
+  assert.equal(f.touch("touchmove", 85, 110, { target: f.swipeArea }).defaultPrevented, false);
+  f.touch("touchend", 85, 110, { target: f.swipeArea });
+  const control = f.doc.createElement("button"); control.textContent = "Action"; f.swipeArea.append(control);
+  for (const target of [control, f.doc.querySelector<HTMLElement>("form > button")!]) {
+    f.touch("touchstart", 80, 50, { target });
+    f.touch("touchmove", 150, 50, { target });
+    f.touch("touchend", 150, 50, { target });
+  }
+  assert.equal(f.accepted(), 0); f.cleanup();
+});
+
+test("sidebar exclusion is scoped to visible suggestions and preserves existing guards", () => {
+  for (const guard of [undefined, "host-owned"]) {
+    const f = fixture(guard);
+    assert.equal(f.swipeArea.getAttribute("data-no-sidebar-swipe"), guard ?? "");
+    f.setEligible(false);
+    assert.equal(f.swipeArea.getAttribute("data-no-sidebar-swipe"), guard ?? null);
+    f.setEligible(true); f.press("Escape");
+    assert.equal(f.swipeArea.getAttribute("data-no-sidebar-swipe"), guard ?? null);
+    f.setEligible(true); f.setGeneration("two");
+    assert.equal(f.swipeArea.getAttribute("data-no-sidebar-swipe"), guard ?? "");
+    f.dispose();
+    assert.equal(f.swipeArea.getAttribute("data-no-sidebar-swipe"), guard ?? null);
+    f.cleanup();
+  }
+});
+
+test("touch-action constrained non-cancelable horizontal moves can still accept", () => {
+  const f = fixture();
+  f.touch("touchstart", 80, 50, { target: f.swipeArea, cancelable: false });
+  f.touch("touchmove", 140, 50, { target: f.swipeArea, cancelable: false });
+  f.touch("touchend", 150, 50, { target: f.swipeArea });
+  assert.equal(f.accepted(), 1); f.cleanup();
 });
