@@ -6,12 +6,26 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+## 0.4.5 - 2026-10-19
+
 ### Fixed
 
+- A right swipe starting in the padded composer text area accepts the
+  suggestion instead of opening the sidebar. Vertical scrolling and pinch
+  zoom remain available, and gestures on nested controls are ignored.
 - The prediction model chooser tries each available provider that supports
   predictions, so an unavailable or failing default provider does not block
   other models. Catalogue failures appear in settings and plugin logs, and
   Retry refreshes discovery without changing the saved prediction model.
+
+### Thanks
+
+- Thanks to [@salemsayed](https://github.com/salemsayed) for fixing
+  composer-padding swipes and documenting touch and iPad verification in
+  [#7](https://github.com/MacHatter1/bb-plugin-composer-predictions/pull/7).
+- Thanks to [@danieldan020991](https://github.com/danieldan020991) for the
+  catalogue bug report and diagnostics in
+  [#5](https://github.com/MacHatter1/bb-plugin-composer-predictions/issues/5).
 
 ## 0.4.4 - 2026-10-18
 
