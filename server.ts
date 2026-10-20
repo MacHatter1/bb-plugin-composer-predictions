@@ -7,7 +7,10 @@ import { buildConversation, generationPrompt, parsePrediction, sourceKey, PREDIC
 
 const WORKER_TITLE = "Composer prediction helper";
 type PredictionPermissionMode = "auto" | "accept-edits";
-type PredictionSource = Source & { execution: { projectId: string; environmentId: string | null; providerId: string; reasoningLevel: string; permissionMode: PredictionPermissionMode; serviceTier?: string } };
+type PredictionSource = Source & { latestSeq: number; execution: { projectId: string; environmentId: string | null; providerId: string; reasoningLevel: string; permissionMode: PredictionPermissionMode; serviceTier?: string } };
+const helperSourceSchema = z.object({ sourceThreadId: z.string().min(1), sourceSeq: z.number().int().nonnegative() });
+const missingThreadSchema = z.object({ status: z.literal(404), code: z.literal("thread_not_found") });
+type Helper = { source: z.infer<typeof helperSourceSchema> | null; archived: boolean; stale: boolean };
 const MODEL_KEY = "prediction-model";
 const PROMPT_KEY = sourceKey(PREDICTION_PROMPT, WORKER_INSTRUCTIONS);
 
@@ -24,7 +27,7 @@ export default async function plugin(bb: BbPluginApi) {
   let modelSelection: ModelSelection | null = storedModel.success ? storedModel.data : null;
   let modelWrite = Promise.resolve();
   const interested = new Set<string>();
-  const workers = new Set<string>();
+  const workers = new Map<string, Helper>();
   const rejectedWorkers = new Set<string>();
   // Helpers whose provider cannot approve automatically. An approval they raise
   // is shown to the user instead of failing the prediction.
@@ -106,6 +109,18 @@ export default async function plugin(bb: BbPluginApi) {
     try { cache.clear(); }
     catch (error) { bb.log.warn(`Prediction cache unavailable: ${String(error)}`); }
     for (const threadId of interested) coordinator.clear(threadId);
+    for (const [threadId, helper] of workers) { helper.stale = true; releaseInBackground(threadId); }
+  }
+  function staleHelpers(sourceThreadId: string, currentSeq?: number) {
+    for (const [threadId, helper] of workers) {
+      if (helper.source?.sourceThreadId !== sourceThreadId || helper.source.sourceSeq === currentSeq) continue;
+      helper.stale = true;
+      releaseInBackground(threadId);
+    }
+  }
+  function clearPrediction(threadId: string) {
+    if (interested.has(threadId)) coordinator.clear(threadId);
+    staleHelpers(threadId);
   }
 
   async function source(threadId: string, signal: AbortSignal): Promise<PredictionSource | null> {
@@ -135,32 +150,51 @@ export default async function plugin(bb: BbPluginApi) {
     }
     const conversation = buildConversation(events, config.contextCharacters);
     if (!conversation) return null;
+    const latestSeq = Math.max(...events.map(event => event.seq));
+    staleHelpers(threadId, latestSeq);
     const identity = { version: 1, prompt: PROMPT_KEY, execution: executionModel, contextCharacters: config.contextCharacters,
-      projectId: thread.projectId, environmentId: thread.environmentId, latestSeq: Math.max(...events.map(event => event.seq)) };
-    return { key: sourceKey(JSON.stringify(identity), conversation), model: executionModel.model, conversation,
+      projectId: thread.projectId, environmentId: thread.environmentId, latestSeq };
+    return { key: sourceKey(JSON.stringify(identity), conversation), model: executionModel.model, conversation, latestSeq,
       execution: { projectId: thread.projectId, environmentId: thread.environmentId, providerId: executionModel.providerId, reasoningLevel: executionModel.reasoningLevel, permissionMode, ...(executionModel.serviceTier ? { serviceTier: executionModel.serviceTier } : {}) } };
   }
   const workerReleases = new Map<string, Promise<void>>();
   // Stop before archive. BB forwards an archive to the provider only once the
   // helper is idle; archiving a running helper leaves that provider chat open.
-  // A failed archive stays tracked so reload and the next start can retry it.
-  // Deleting the BB thread would drop the only link to that chat.
+  // Keep the BB thread until archive succeeds; stale helpers can then be deleted.
   function releaseWorker(threadId: string): Promise<void> {
     const current = workerReleases.get(threadId);
     if (current) return current;
+    const helper = workers.get(threadId);
+    if (!helper || (helper.archived && !helper.stale)) return Promise.resolve();
     const release = (async () => {
-      try { await bb.sdk.threads.stop({ threadId }); }
-      catch (error) { bb.log.warn(`Prediction helper stop: ${String(error)}`); }
-      // A helper opened for approval would otherwise stay in the sidebar after
-      // its archive. Hiding can fail; the archive is still the cleanup that matters.
-      if (revealedWorkers.has(threadId)) {
-        try { await bb.sdk.threads.update({ threadId, visibility: "hidden" }); }
-        catch (error) { bb.log.warn(`Prediction helper hide: ${String(error)}`); }
-      }
       try {
-        await bb.sdk.threads.archive({ threadId });
-        workers.delete(threadId);
-      } catch (error) { bb.log.warn(`Prediction helper archive: ${String(error)}`); }
+        if (!helper.archived) {
+          try { await bb.sdk.threads.stop({ threadId }); }
+          catch (error) { bb.log.warn(`Prediction helper stop: ${String(error)}`); }
+          if (revealedWorkers.has(threadId)) {
+            try { await bb.sdk.threads.update({ threadId, visibility: "hidden" }); }
+            catch (error) { bb.log.warn(`Prediction helper hide: ${String(error)}`); }
+          }
+          try {
+            await bb.sdk.threads.archive({ threadId });
+            helper.archived = true;
+          } catch (error) { bb.log.warn(`Prediction helper archive: ${String(error)}`); }
+        }
+        if (helper.stale) {
+          // Preserve explicit invalidation across reload even when the source
+          // sequence is unchanged, such as after a regeneration.
+          await bb.sdk.threads.updatePluginMetadata({ threadId, pluginId: bb.pluginId, set: { predictionStale: true } });
+          if (!helper.archived) return;
+          const current = await bb.sdk.threads.get({ threadId });
+          if (current.deletedAt) { workers.delete(threadId); return; }
+          if (current.status !== "idle" && current.status !== "error") return;
+          await bb.sdk.threads.delete({ threadId, childThreadsConfirmed: false });
+          workers.delete(threadId);
+        }
+      } catch (error) {
+        if (missingThreadSchema.safeParse(error).success) workers.delete(threadId);
+        else bb.log.warn(`Prediction helper cleanup: ${String(error)}`);
+      }
       finally {
         workerReleases.delete(threadId);
         rejectedWorkers.delete(threadId); promptedWorkers.delete(threadId); approvalRequested.delete(threadId);
@@ -230,9 +264,9 @@ export default async function plugin(bb: BbPluginApi) {
           providerId: execution.providerId, model: snapshot.model, reasoningLevel: execution.reasoningLevel,
           ...(execution.serviceTier ? { serviceTier: execution.serviceTier } : {}),
           permissionMode: execution.permissionMode, visibility: "hidden", title: WORKER_TITLE,
-          pluginMetadata: { predictionWorker: true }, prompt: generationPrompt(snapshot.conversation),
+          pluginMetadata: { predictionWorker: true, sourceThreadId: threadId, sourceSeq: snapshot.latestSeq }, prompt: generationPrompt(snapshot.conversation),
         });
-        workers.add(worker.id);
+        workers.set(worker.id, { source: { sourceThreadId: threadId, sourceSeq: snapshot.latestSeq }, archived: false, stale: parentSignal.aborted });
         if (asksForApproval) promptedWorkers.add(worker.id);
         try {
           // An interaction can be committed before spawn() resolves, before the
@@ -284,22 +318,24 @@ export default async function plugin(bb: BbPluginApi) {
     interested.add(threadId);
     if (interested.size > 1000) {
       const oldest = interested.values().next().value;
-      if (oldest) { interested.delete(oldest); coordinator.clear(oldest); }
+      if (oldest) { clearPrediction(oldest); interested.delete(oldest); }
     }
   }
   bb.events.on("thread.idle", ({ thread }) => {
     wakeups.get(thread.id)?.();
+    if (workers.get(thread.id)?.stale) releaseInBackground(thread.id);
     if (interested.has(thread.id)) coordinator.request(thread.id);
   });
-  bb.events.on("thread.failed", ({ thread }) => { wakeups.get(thread.id)?.(); if (interested.has(thread.id)) coordinator.clear(thread.id); });
+  bb.events.on("thread.failed", ({ thread }) => { wakeups.get(thread.id)?.(); clearPrediction(thread.id); if (workers.get(thread.id)?.stale) releaseInBackground(thread.id); });
   for (const name of ["thread.active", "thread.archived", "thread.deleted"] as const) {
     bb.events.on(name, ({ thread }) => {
-      if (interested.has(thread.id)) coordinator.clear(thread.id);
+      clearPrediction(thread.id);
+      if (name === "thread.deleted") workers.delete(thread.id);
       if (name !== "thread.active") interested.delete(thread.id);
     });
   }
   for (const name of ["message.queued", "message.dispatched"] as const) {
-    bb.events.on(name, ({ entry }) => { if (interested.has(entry.threadId)) coordinator.clear(entry.threadId); });
+    bb.events.on(name, ({ entry }) => clearPrediction(entry.threadId));
   }
   bb.events.on("interaction.pending", async ({ thread }) => {
     if (promptedWorkers.has(thread.id)) {
@@ -313,7 +349,7 @@ export default async function plugin(bb: BbPluginApi) {
       // The generation's own cleanup stops the helper again, so a failure here only needs logging.
       try { await bb.sdk.threads.stop({ threadId: thread.id }); }
       catch (error) { bb.log.warn(`Prediction helper stop: ${String(error)}`); }
-    } else if (interested.has(thread.id)) coordinator.clear(thread.id);
+    } else clearPrediction(thread.id);
   });
   bb.rpc.register(rpcContract, {
     model_get: () => readModelSettings(),
@@ -321,7 +357,7 @@ export default async function plugin(bb: BbPluginApi) {
     model_clear: () => changeModel(null),
     get: ({ threadId }) => coordinator.get(threadId),
     ensure: ({ threadId }) => { watch(threadId); return coordinator.request(threadId); },
-    regenerate: ({ threadId }) => { watch(threadId); coordinator.clear(threadId); return coordinator.request(threadId, true); },
+    regenerate: ({ threadId }) => { watch(threadId); clearPrediction(threadId); return coordinator.request(threadId, true); },
     dismiss: ({ threadId, generationId }) => coordinator.dismiss(threadId, generationId),
   });
   bb.cli.register({
@@ -330,7 +366,7 @@ export default async function plugin(bb: BbPluginApi) {
     async run(argv) {
       const [command, threadId] = argv.filter(value => value !== "--json");
       if (!threadId || !["show", "regenerate", "dismiss"].includes(command)) return { exitCode: 0, stdout: "bb composer-predictions show|regenerate|dismiss <thread-id> [--json]" };
-      if (command === "regenerate") { watch(threadId); coordinator.clear(threadId); coordinator.request(threadId, true); }
+      if (command === "regenerate") { watch(threadId); clearPrediction(threadId); coordinator.request(threadId, true); }
       if (command === "dismiss") coordinator.dismiss(threadId, coordinator.get(threadId).generationId);
       const state = coordinator.get(threadId);
       return { exitCode: 0, stdout: argv.includes("--json") ? JSON.stringify(state) : state.suggestion ?? state.status };
@@ -338,33 +374,57 @@ export default async function plugin(bb: BbPluginApi) {
   });
   bb.onDispose(async () => {
     await coordinator.dispose();
-    await Promise.allSettled([...workers].map(threadId => releaseWorker(threadId)));
+    await Promise.allSettled([...workers.keys()].map(threadId => releaseWorker(threadId)));
   });
-  // Lifecycle events are not replayed after a process crash. Reconcile only
-  // this plugin's marked, unarchived workers that have finished. A helper
-  // opened for approval is visible; it is hidden again before it is archived.
-  // The current conversation and a helper that is still running are left alone.
-  // A failed lookup skips recovery for now; it must not stop the plugin loading.
-  const abandoned: string[] = [];
-  try {
-    for (let offset = 0; ; offset += 100) {
-      const rows = await bb.sdk.threads.list({ originPluginId: bb.pluginId, includeHidden: true, archived: false, limit: 100, offset });
-      for (const row of rows) {
-        if (row.originPluginId !== bb.pluginId || row.title !== WORKER_TITLE || row.archivedAt || row.deletedAt) continue;
-        // A helper that is still running belongs to a live prediction, including
-        // one waiting for approval. The next start releases it once that
-        // prediction is idle or has failed.
-        if (row.status !== "idle" && row.status !== "error") continue;
-        try {
-          const metadata = await bb.sdk.threads.getPluginMetadata({ threadId: row.id, pluginId: bb.pluginId });
-          if (metadata?.predictionWorker === true) {
-            if (row.visibility === "visible") revealedWorkers.add(row.id);
-            abandoned.push(row.id);
-          }
-        } catch (error) { bb.log.warn(`Prediction helper recovery skipped ${row.id}: ${String(error)}`); }
+  // Backlogs can exceed BB's factory timeout. Recover after load, with reads
+  // cancelled on disposal, and keep current conversations and helpers alone.
+  bb.background.service("helper-cleanup", { start: recoverHelpers });
+  async function recoverHelpers(signal: AbortSignal) {
+    const discovered = new Map<string, Awaited<ReturnType<typeof bb.sdk.threads.list>>[number]>();
+    async function checkSource(threadId: string) {
+      try {
+        const thread = await bb.sdk.threads.get({ threadId, signal });
+        const moved = thread.status !== "idle" || !!thread.archivedAt || !!thread.deletedAt || thread.queuedMessageCount > 0;
+        if (moved) return { moved, latestSeq: 0 };
+        const events = await bb.sdk.threads.events.list({ threadId, order: "desc", limit: "1", types: ["client/turn/requested", "item/completed"], signal });
+        return { moved: false, latestSeq: Math.max(0, ...events.map(event => event.seq)) };
+      } catch (error) {
+        if (missingThreadSchema.safeParse(error).success) return { moved: true, latestSeq: 0 };
+        throw error;
       }
-      if (rows.length < 100) break;
     }
-  } catch (error) { bb.log.warn(`Prediction helper recovery: ${String(error)}`); }
-  for (const threadId of abandoned) { workers.add(threadId); await releaseWorker(threadId); }
+    try {
+      for (const archived of [false, true]) {
+        for (let offset = 0; ; offset += 100) {
+          if (signal.aborted) return;
+          const rows = await bb.sdk.threads.list({ originPluginId: bb.pluginId, includeHidden: true, archived, limit: 100, offset, signal });
+          for (const row of rows) if (!discovered.has(row.id)) discovered.set(row.id, row);
+          if (rows.length < 100) break;
+        }
+      }
+    } catch (error) { if (signal.aborted) return; bb.log.warn(`Prediction helper recovery: ${String(error)}`); }
+    for (const row of discovered.values()) {
+      if (signal.aborted) return;
+      if (row.originPluginId !== bb.pluginId || row.title !== WORKER_TITLE || row.deletedAt || workers.has(row.id)) continue;
+      try {
+        const metadata = await bb.sdk.threads.getPluginMetadata({ threadId: row.id, pluginId: bb.pluginId, signal });
+        if (metadata?.predictionWorker !== true) continue;
+        const finished = row.status === "idle" || row.status === "error";
+        const parsed = helperSourceSchema.safeParse(metadata);
+        if (!finished && !parsed.success) continue;
+        const helper: Helper = { source: parsed.success ? parsed.data : null, archived: !!row.archivedAt, stale: metadata.predictionStale === true || !parsed.success };
+        workers.set(row.id, helper);
+        if (helper.source && !helper.stale) {
+          try {
+            const current = await checkSource(helper.source.sourceThreadId);
+            helper.stale ||= current.moved || current.latestSeq !== helper.source.sourceSeq;
+          } catch (error) { if (signal.aborted) return; bb.log.warn(`Prediction helper source check ${row.id}: ${String(error)}`); }
+        }
+        if (!finished && !helper.stale) { workers.delete(row.id); continue; }
+        if (row.visibility === "visible") revealedWorkers.add(row.id);
+        if (signal.aborted) return;
+        await releaseWorker(row.id);
+      } catch (error) { if (signal.aborted) return; bb.log.warn(`Prediction helper recovery skipped ${row.id}: ${String(error)}`); }
+    }
+  }
 }

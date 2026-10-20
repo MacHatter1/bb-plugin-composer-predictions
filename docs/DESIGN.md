@@ -54,16 +54,33 @@ forwards an archive to a provider that advertises
 is still running leaves the provider chat open. The archive runs in the
 background, so a slow provider does not delay the suggestion. A failed archive
 is logged and the helper stays tracked for another try on reload and on the
-next start; the BB thread is not deleted, because it is the link to that chat.
-On startup, the plugin finds its own marked, unarchived helpers that
-have finished (idle or failed) and releases them the same way, including one
-left visible because it was opened for approval. The current
-conversation and a helper that is still running are left alone; a running
-helper is released on a later start, once it is idle or has failed. If that
-lookup fails, it logs a warning, releases the helpers it could read, and loads
-anyway; the rest are found on the next start. A failed stop after a helper
-asks for approval or input is also only logged, and the same release archives
-it once it can be stopped. Normal provider usage and billing apply.
+next start. The BB thread stays available until its archive request succeeds.
+
+Each helper records its source thread ID and the latest conversation event
+sequence in plugin metadata. When the source moves on, the helper becomes
+stale: after archive succeeds and its status is idle or failed, the plugin
+deletes it using BB's normal thread deletion. This covers source activity,
+failure, archive, deletion, queued or dispatched messages, and pending
+interactions. Explicit regeneration and settings changes also invalidate
+older helpers. The invalidation is saved in metadata so a failed deletion can
+be retried after reload even if the conversation sequence has not changed.
+Current suggestions stay cached independently of their helper threads. This
+deletes the BB helper. BB forwards supported archive requests to the provider,
+but its thread deletion does not request permanent provider-side deletion.
+Provider sessions can therefore remain in the provider's archive.
+
+After startup, a background service scans the plugin's own marked helpers,
+including archived ones, before deleting any recovered rows so pagination
+cannot skip helpers. It checks the
+source status and latest conversation event to find offline changes. A
+temporary lookup failure preserves the helper and logs a warning; a confirmed
+missing source makes it stale. Finished helpers from older versions without
+source metadata are cleaned up too. A running helper with an unchanged source
+is left alone. A stale helper whose stop is not yet confirmed waits until it
+becomes idle or failed before deletion. Cleanup failures remain tracked for
+another attempt on disposal or the next start. Normal provider usage and
+billing apply. Recovery does not hold up plugin loading, and its reads are
+cancelled when the plugin is disposed.
 
 The prediction instruction in `lib/prediction.ts` asks for a useful next user
 action and prefers abstention over repeating work already requested, promised,
@@ -97,7 +114,7 @@ latest four fifths are kept, joined by a `[content omitted]` marker.
 This is a BB event reconstruction, not a native provider session fork. The
 helper also receives the provider's usual environment and agent instructions.
 BB retains the helper's history, including the quoted conversation, as an
-archived hidden thread.
+archived hidden thread until the helper becomes stale and is deleted.
 
 ## Tools and permissions
 
