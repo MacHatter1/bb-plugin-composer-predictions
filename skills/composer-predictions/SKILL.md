@@ -10,7 +10,11 @@ empty thread composer after an agent reply. **Tab** or a right swipe inside the 
 draft. It never sends anything. Each prediction is one request to a hidden
 helper thread, stopped and then archived once its answer is used or the
 conversation moves on. Providers that support archive get that chat archived
-too. It never posts to the user's thread.
+too. After the source conversation moves on, or a prediction is regenerated,
+the plugin deletes the stale BB helper using BB's normal thread deletion.
+Provider sessions can remain archived; permanent provider-side deletion is
+not requested. Cleanup failures are retried on reload. It never posts to the
+user's thread.
 
 ## Commands
 

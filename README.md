@@ -213,7 +213,8 @@ Context limits, cache rules, key handling and compatibility are covered in
   text, mentions or attachments.
 - 🧵 **Leaves your thread alone.** Predictions run in separate hidden helpers,
   never in your conversation. Helpers left behind by a crash are cleaned up on
-  the next start.
+  the next start. BB helpers are deleted after the source conversation moves on,
+  with stop and archive completed first.
 - 💸 **Costs a model request per new reply.** Normal provider usage applies. A
   thread is watched from the first time you open it with an empty message box
   until it is archived or deleted, or the plugin restarts. Each later reply
@@ -227,7 +228,10 @@ Context limits, cache rules, key handling and compatibility are covered in
   receives it too.
 - 🗄️ **Stores no copy of your conversation.** The plugin's database keeps the
   suggestion, its status and a fingerprint. BB itself keeps each helper's
-  history, including the quoted conversation, as an archived hidden thread.
+  history, including the quoted conversation, as an archived hidden thread
+  until the conversation moves on; the plugin then uses BB's normal thread
+  deletion to remove the helper. Provider-side sessions are archived where
+  supported; this does not permanently delete them from the provider.
 - ⚠️ **Not a sandbox.** The helper is told not to use tools and to treat the
   conversation as quoted data. A provider that can approve automatically runs
   it in `auto` and the helper is stopped if it asks for approval or input.

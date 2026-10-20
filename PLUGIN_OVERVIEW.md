@@ -27,9 +27,12 @@ Tab or a right swipe only fills an empty draft through BB's public composer
 API, and the plugin never submits a message. Each prediction is one request in a hidden helper
 thread, never in your conversation, stopped and then archived as soon as its
 answer is used or the conversation moves on. Providers that support archive
-get that chat archived too. Normal provider usage applies. Once you open a
-thread with an empty message box, each later reply
-there costs one request, even when you are not looking at it, until the thread
+get that chat archived too. BB helpers are deleted when the conversation moves
+on or you regenerate the prediction. Provider sessions can remain archived;
+the plugin does not permanently delete them. Failed cleanup is retried on reload.
+Normal provider usage applies. Once you open a thread with an empty message
+box, each later reply there costs one request, even when you are not looking
+at it, until the thread
 is archived or deleted or the plugin restarts. At most two helpers run at
 once, and an unchanged conversation reuses its saved result.
 
@@ -37,7 +40,8 @@ Each request carries up to 48,000 characters of recent messages and tool
 output by default. A separate prediction model's provider receives that too.
 The plugin's database stores the suggestion, its status and a fingerprint,
 not your conversation. BB keeps each helper's history as an archived hidden
-thread. The helper is told not to use tools. A provider that can approve
+thread until it becomes stale and the plugin deletes it. The helper is told
+not to use tools. A provider that can approve
 automatically runs it in `auto` permission mode, and the helper is stopped if
 it asks for approval or input. A provider that cannot is allowed to ask: the
 helper opens beside the conversation until you answer. It is not a tool-free
