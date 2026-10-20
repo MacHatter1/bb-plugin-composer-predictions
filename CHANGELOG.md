@@ -6,13 +6,17 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
-### Added
+## 0.4.6 - 2026-10-20
+
+### Fixed
 
 - Automatically delete BB prediction helpers when their source conversation moves
   on or a prediction is regenerated. Helpers are stopped and archived first.
   Startup also recovers stale helpers, including archived helpers and finished
   helpers from older versions; failed cleanup is retried on reload.
   Provider sessions are archived where supported, rather than permanently deleted.
+- Run startup recovery in the background so a large helper backlog does not
+  exceed BB's plugin loading timeout.
 
 ## 0.4.5 - 2026-10-19
 
