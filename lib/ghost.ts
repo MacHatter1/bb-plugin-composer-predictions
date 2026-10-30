@@ -83,6 +83,13 @@ export function mountGhostDecorations(doc: Document): () => void {
         maxHeight: `${(parseFloat(font.lineHeight) || parseFloat(font.fontSize) * 1.7 || 22) * (state.compact ? 1 : 3)}px`,
       });
     }
+    // Typing only hides the suggestion: it comes back if the draft is cleared.
+    // Escape, acceptance and sending dismiss it for the generation.
+    function hide() {
+      swipe = null; visible = false; overlay.hidden = true;
+      delete editor.dataset.composerPredictionActive;
+      reserveSwipeArea(false);
+    }
     function dismiss() {
       swipe = null; dismissed = true; visible = false; overlay.hidden = true;
       delete editor.dataset.composerPredictionActive;
@@ -149,7 +156,8 @@ export function mountGhostDecorations(doc: Document): () => void {
       if (!delta || delta.dx < 48 || delta.dx < delta.dy * 2 || generationId !== lastGeneration) return;
       if (accept() && event.cancelable) event.preventDefault();
     };
-    const onCompositionStart = () => { composing = true; dismiss(); update(); };
+    const onCompositionStart = () => { composing = true; hide(); };
+    const onEdit = (event: Event) => { if (event.type === "input") update(); else hide(); };
     const onCompositionEnd = () => { composing = false; update(); };
     editor.addEventListener("keydown", onKey, true);
     doc.addEventListener("touchstart", onAdditionalTouch, { capture: true, passive: true });
@@ -158,7 +166,7 @@ export function mountGhostDecorations(doc: Document): () => void {
     swipeArea.addEventListener("touchend", onTouchEnd, { capture: true, passive: false });
     swipeArea.addEventListener("touchcancel", cancelSwipe, true);
     swipeArea.addEventListener("contextmenu", cancelSwipe, true);
-    for (const event of ["beforeinput", "input", "paste", "drop"] as const) editor.addEventListener(event, dismiss, true);
+    for (const event of ["beforeinput", "input", "paste", "drop"] as const) editor.addEventListener(event, onEdit, true);
     editor.addEventListener("compositionstart", onCompositionStart, true);
     editor.addEventListener("compositionend", onCompositionEnd, true);
     const Resize = win.ResizeObserver;
@@ -179,7 +187,7 @@ export function mountGhostDecorations(doc: Document): () => void {
         swipeArea.removeEventListener("touchend", onTouchEnd, true);
         swipeArea.removeEventListener("touchcancel", cancelSwipe, true);
         swipeArea.removeEventListener("contextmenu", cancelSwipe, true);
-        for (const event of ["beforeinput", "input", "paste", "drop"] as const) editor.removeEventListener(event, dismiss, true);
+        for (const event of ["beforeinput", "input", "paste", "drop"] as const) editor.removeEventListener(event, onEdit, true);
         editor.removeEventListener("compositionstart", onCompositionStart, true);
         editor.removeEventListener("compositionend", onCompositionEnd, true);
       },

@@ -59,7 +59,7 @@ function PredictionBridge() {
     if (composer.isRunning) {
       dismissOnArrival.current = false;
       if (prediction?.generationId) dismissedGeneration.current = prediction.generationId;
-    } else if (!composer.isEmpty || dismissOnArrival.current) dismiss();
+    } else if (dismissOnArrival.current) dismiss();
   }, [composer.isEmpty, composer.isRunning, prediction, dismiss]);
 
   useEffect(() => {

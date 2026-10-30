@@ -44,15 +44,26 @@ test("ghost is outside the editor; only plain Tab accepts, never submits", () =>
   assert.equal(f.press("Tab").defaultPrevented, false);
   f.cleanup();
 });
-test("typing and IME dismiss immediately; a nonempty or unavailable composer cannot accept", () => {
+test("typing and IME hide without dismissing; a nonempty or unavailable composer cannot accept", () => {
   for (const event of ["beforeinput", "paste", "compositionstart"]) {
     const f = fixture(); f.editor.dispatchEvent(new f.dom.window.Event(event, { bubbles: true }));
     assert.equal(f.doc.querySelector<HTMLElement>("[data-composer-prediction-ghost]")!.hidden, true);
-    assert.equal(f.press("Tab").defaultPrevented, false); assert.equal(f.dismissed(), 1); f.cleanup();
+    // While composing, Tab must not insert; plain edits are followed by input, which re-evaluates.
+    if (event === "compositionstart") assert.equal(f.press("Tab").defaultPrevented, false);
+    assert.equal(f.dismissed(), 0); f.cleanup();
   }
   const f = fixture(); f.editor.textContent = "my own draft"; refreshGhost();
   assert.equal(f.press("Tab").defaultPrevented, false); assert.equal(f.accepted(), 0);
   f.editor.textContent = ""; f.setEligible(false); assert.equal(f.press("Tab").defaultPrevented, false); f.cleanup();
+});
+test("clearing a typed draft brings the same suggestion back", () => {
+  const f = fixture(); const ghost = () => f.doc.querySelector<HTMLElement>("[data-composer-prediction-ghost]")!;
+  f.editor.dispatchEvent(new f.dom.window.Event("beforeinput", { bubbles: true }));
+  f.editor.textContent = "a"; f.editor.dispatchEvent(new f.dom.window.Event("input", { bubbles: true }));
+  assert.equal(ghost().hidden, true);
+  f.editor.textContent = ""; f.editor.dispatchEvent(new f.dom.window.Event("input", { bubbles: true }));
+  assert.equal(ghost().hidden, false); assert.equal(f.dismissed(), 0);
+  assert.equal(f.press("Tab").defaultPrevented, true); assert.equal(f.accepted(), 1); f.cleanup();
 });
 test("Escape dismisses without trapping focus and cleanup restores editor styling", () => {
   const f = fixture(); assert.ok(f.editor.hasAttribute("data-composer-prediction-active"));
@@ -82,10 +93,10 @@ test("ambiguous or moved composer shells release their old overlay and Tab handl
   assert.equal(f.doc.querySelector("[data-composer-prediction-ghost]"), null);
   assert.equal(f.press("Tab").defaultPrevented, false); f.cleanup();
 });
-test("editing while generation is pending still notifies the composer bridge", () => {
+test("editing while generation is pending does not dismiss the arriving suggestion", () => {
   const f = fixture(); f.setEligible(false);
   f.editor.dispatchEvent(new f.dom.window.Event("beforeinput", { bubbles: true }));
-  assert.equal(f.dismissed(), 1); f.cleanup();
+  assert.equal(f.dismissed(), 0); f.cleanup();
 });
 test("read-only and voice-mode transitions hide the ghost without waiting for a React render", async () => {
   for (const mode of ["readonly", "voice"]) {

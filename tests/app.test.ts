@@ -77,24 +77,22 @@ test("touch acceptance uses the public composer API without submitting", async (
     await waitFor(() => assert.equal(f.visible(), false));
   } finally { await f.cleanup(); }
 });
-test("typing and clearing before the first RPC response dismisses the arriving generation", async () => {
+test("typing and clearing before the first RPC response keeps the arriving generation", async () => {
   let release = (_state: PredictionState) => {};
   const held = new Promise<PredictionState>(resolve => { release = resolve; });
-  const f = await fixture(() => held);
+  let calls = 0; // later ensures answer from the server cache, like the real coordinator
+  const f = await fixture(() => (calls++ === 0 ? held : Promise.resolve({ ...initial })));
   try {
     await act(async () => { f.editor.dispatchEvent(new dom.window.Event("beforeinput", { bubbles: true })); });
-    await f.slot.behavior.setComposerText("my draft"); await f.slot.behavior.setComposerText("");
+    await f.slot.behavior.setComposerText("my draft");
     await act(async () => { release({ ...initial, status: "generating", suggestion: null }); });
-    await waitFor(() => assert.ok(f.slot.inspection.rpcCalls.some(call => call.method === "dismiss" && (call.input as { generationId: string }).generationId === "one")));
-    await f.update(initial); // A late realtime read must not resurrect this generation.
-    assert.equal(f.visible(), false);
-    assert.equal((await f.press("Tab")).defaultPrevented, false);
-    assert.equal(f.slot.inspection.composer.text, "");
-    await f.update({ ...initial, generationId: "next-turn" });
+    await f.update(initial);
+    assert.equal(f.visible(), false); // hidden while the draft has text
+    await f.slot.behavior.setComposerText("");
     await waitFor(() => assert.equal(f.visible(), true));
+    assert.equal(f.slot.inspection.rpcCalls.some(call => call.method === "dismiss"), false);
   } finally { await f.cleanup(); }
 });
-
 test("settings picker saves a separate model, reports failures, and restores conversation mode", async () => {
   const seed: ModelSelection = { providerId: "codex", model: "prediction-model", reasoningLevel: "low" };
   let saved: ModelSelection | null = null;
