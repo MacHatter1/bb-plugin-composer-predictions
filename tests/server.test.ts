@@ -90,10 +90,86 @@ test("server completes a prediction, keeps the source untouched, and cleans up i
     await untilReleased(harness);
     assert.equal(harness.inspection.sdk.callsTo("threads.spawn").length, 1);
     assert.equal((harness.inspection.sdk.callsTo("threads.spawn")[0][0] as { permissionMode?: string }).permissionMode, "auto");
+    assert.equal(harness.inspection.sdk.callsTo("projects.get").length, 0);
+    assert.equal(harness.inspection.sdk.callsTo("environments.list").length, 0);
     assert.deepEqual(operations, ["stop:worker", "archive:worker"]);
     assert.equal(harness.inspection.sdk.callsTo("threads.send").length, 0);
   } finally { await harness.lifecycle.dispose(); }
 });
+test("a personal thread without an environment reuses its personal workspace for catalog and helper", async () => {
+  const { bb, harness } = fixture();
+  const personalSource = { ...source, projectId: "personal-project", environmentId: null };
+  harness.sdk.stub("threads.get", async ({ threadId }) => threadId === "source" ? personalSource : worker);
+  harness.sdk.stub("projects.get", async () => ({ kind: "personal" }));
+  harness.sdk.stub("environments.list", async () => [
+    { id: "unmanaged", workspaceProvisionType: "unmanaged", status: "ready", lifecycle: { phase: "active" }, hostLifecycle: "active" },
+    { id: "destroyed", workspaceProvisionType: "personal", status: "destroyed", lifecycle: { phase: "destroyed" }, hostLifecycle: "active" },
+    { id: "personal-workspace", workspaceProvisionType: "personal", status: "ready", lifecycle: { phase: "active" }, hostLifecycle: "active" },
+  ]);
+  harness.sdk.stub("threads.spawn", async (args: { environment: unknown }) => {
+    assert.deepEqual(args.environment, { type: "reuse", environmentId: "personal-workspace" });
+    return worker;
+  });
+  try {
+    await loadPlugin(bb, harness);
+    await harness.behavior.callRpc("ensure", { threadId: "source" });
+    assert.equal((await untilSettled(harness)).status, "ready");
+    assert.equal(harness.inspection.sdk.callsTo("threads.spawn").length, 1);
+    const catalogArgs = harness.inspection.sdk.callsTo("providers.models").at(-1)![0] as { environmentId?: string };
+    assert.equal(catalogArgs.environmentId, "personal-workspace");
+  } finally { await harness.lifecycle.dispose(); }
+});
+
+for (const count of [0, 2]) {
+  test(`a personal thread with ${count} usable workspaces does not guess an execution environment`, async () => {
+    const { bb, harness } = fixture();
+    harness.sdk.stub("threads.get", async ({ threadId }) => threadId === "source" ? { ...source, environmentId: null } : worker);
+    harness.sdk.stub("projects.get", async () => ({ kind: "personal" }));
+    harness.sdk.stub("environments.list", async () => Array.from({ length: count }, (_, id) => ({
+      id: `personal-${id}`, workspaceProvisionType: "personal", status: "ready", lifecycle: { phase: "active" }, hostLifecycle: "active",
+    })));
+    try {
+      await loadPlugin(bb, harness);
+      await harness.behavior.callRpc("ensure", { threadId: "source" });
+      const state = await untilSettled(harness);
+      assert.equal(state.status, "error");
+      assert.ok(warned(harness, count ? "multiple personal workspaces" : "no ready personal workspace"));
+      assert.equal(harness.inspection.sdk.callsTo("threads.spawn").length, 0);
+    } finally { await harness.lifecycle.dispose(); }
+  });
+}
+
+test("personal workspace resolution reads past the first page", async () => {
+  const { bb, harness } = fixture();
+  harness.sdk.stub("threads.get", async ({ threadId }) => threadId === "source" ? { ...source, environmentId: null } : worker);
+  harness.sdk.stub("projects.get", async () => ({ kind: "personal" }));
+  harness.sdk.stub("environments.list", async ({ offset }: { offset: number }) => offset === 0
+    ? Array.from({ length: 100 }, (_, id) => ({ id: `old-${id}`, workspaceProvisionType: "personal", status: "destroyed" }))
+    : [{ id: "personal-workspace", workspaceProvisionType: "personal", status: "ready", lifecycle: { phase: "active" }, hostLifecycle: "active" }]);
+  try {
+    await loadPlugin(bb, harness);
+    await harness.behavior.callRpc("ensure", { threadId: "source" });
+    assert.equal((await untilSettled(harness)).status, "ready");
+    const args = harness.inspection.sdk.callsTo("threads.spawn")[0][0] as { environment: unknown };
+    assert.deepEqual(args.environment, { type: "reuse", environmentId: "personal-workspace" });
+    assert.equal(harness.inspection.sdk.callsTo("environments.list").length, 2);
+  } finally { await harness.lifecycle.dispose(); }
+});
+
+test("a standard project without an environment keeps project-default routing", async () => {
+  const { bb, harness } = fixture();
+  harness.sdk.stub("threads.get", async ({ threadId }) => threadId === "source" ? { ...source, environmentId: null } : worker);
+  harness.sdk.stub("projects.get", async () => ({ kind: "standard" }));
+  try {
+    await loadPlugin(bb, harness);
+    await harness.behavior.callRpc("ensure", { threadId: "source" });
+    assert.equal((await untilSettled(harness)).status, "ready");
+    const args = harness.inspection.sdk.callsTo("threads.spawn")[0][0] as { environment: unknown };
+    assert.deepEqual(args.environment, { type: "project-default" });
+    assert.equal(harness.inspection.sdk.callsTo("environments.list").length, 0);
+  } finally { await harness.lifecycle.dispose(); }
+});
+
 test("a helper is stopped, archived and deleted as soon as its thread moves on", async () => {
   const { bb, harness, operations } = fixture();
   const running = { ...worker, status: "active" as const };

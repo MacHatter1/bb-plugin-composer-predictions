@@ -123,6 +123,27 @@ export default async function plugin(bb: BbPluginApi) {
     staleHelpers(threadId);
   }
 
+  async function predictionEnvironmentId(projectId: string, environmentId: string | null, signal: AbortSignal): Promise<string | null> {
+    if (environmentId) return environmentId;
+    const project = await bb.sdk.projects.get({ projectId, signal });
+    if (project.kind !== "personal") return null;
+    // Legacy personal threads may have no environment attached. Only reuse an
+    // unambiguous live personal workspace; never guess between machines.
+    const candidates: string[] = [];
+    const limit = 100;
+    for (let offset = 0; ; offset += limit) {
+      const environments = await bb.sdk.environments.list({ projectId, limit, offset, signal });
+      for (const environment of environments) {
+        if (environment.workspaceProvisionType === "personal" && environment.status === "ready"
+          && environment.lifecycle.phase === "active" && environment.hostLifecycle === "active") candidates.push(environment.id);
+      }
+      if (candidates.length > 1) throw new Error("This personal thread has no environment and multiple personal workspaces are available. Attach the thread to its workspace before requesting predictions.");
+      if (environments.length < limit) break;
+    }
+    if (!candidates.length) throw new Error("This personal thread has no environment and no ready personal workspace is available. Attach the thread to a personal workspace before requesting predictions.");
+    return candidates[0];
+  }
+
   async function source(threadId: string, signal: AbortSignal): Promise<PredictionSource | null> {
     if (!config.enabled) return null;
     const override = modelSelection;
@@ -130,10 +151,11 @@ export default async function plugin(bb: BbPluginApi) {
     if (thread.status !== "idle" || thread.visibility === "hidden" || thread.archivedAt || thread.deletedAt || thread.queuedMessageCount > 0 || thread.activeBackgroundAgentCount > 0) return null;
     const options = override ? null : await bb.sdk.threads.defaultExecutionOptions({ threadId, signal });
     if (!override && !options?.model) return null;
+    const environmentId = await predictionEnvironmentId(thread.projectId, thread.environmentId, signal);
     const providerId = override?.providerId ?? thread.providerId;
     const wantedModel = override?.model ?? options!.model;
-    const catalog = await bb.sdk.providers.models(thread.environmentId
-      ? { providerId, environmentId: thread.environmentId, signal }
+    const catalog = await bb.sdk.providers.models(environmentId
+      ? { providerId, environmentId, signal }
       : { providerId, projectId: thread.projectId, signal });
     const model = catalog.models.find(row => row.model === wantedModel || row.id === wantedModel);
     const efforts = model?.supportedReasoningEfforts.map(row => row.reasoningEffort) ?? [];
@@ -153,9 +175,9 @@ export default async function plugin(bb: BbPluginApi) {
     const latestSeq = Math.max(...events.map(event => event.seq));
     staleHelpers(threadId, latestSeq);
     const identity = { version: 1, prompt: PROMPT_KEY, execution: executionModel, contextCharacters: config.contextCharacters,
-      projectId: thread.projectId, environmentId: thread.environmentId, latestSeq };
+      projectId: thread.projectId, environmentId, latestSeq };
     return { key: sourceKey(JSON.stringify(identity), conversation), model: executionModel.model, conversation, latestSeq,
-      execution: { projectId: thread.projectId, environmentId: thread.environmentId, providerId: executionModel.providerId, reasoningLevel: executionModel.reasoningLevel, permissionMode, ...(executionModel.serviceTier ? { serviceTier: executionModel.serviceTier } : {}) } };
+      execution: { projectId: thread.projectId, environmentId, providerId: executionModel.providerId, reasoningLevel: executionModel.reasoningLevel, permissionMode, ...(executionModel.serviceTier ? { serviceTier: executionModel.serviceTier } : {}) } };
   }
   const workerReleases = new Map<string, Promise<void>>();
   // Stop before archive. BB forwards an archive to the provider only once the
