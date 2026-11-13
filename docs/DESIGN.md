@@ -40,6 +40,13 @@ to ask for approval. A provider whose only mode is Full Access is refused,
 because that mode never asks. An unavailable provider, model or service tier
 produces an error. The plugin never silently substitutes another model.
 
+For legacy Personal threads with no attached environment ID, the plugin first
+reads the source thread's latest recorded provisioning environment. If no such
+record exists, it looks for a ready provider-backed Personal workspace whose
+instance key is the source thread ID. Custom projectless providers are eligible.
+Unrelated chats' workspaces are never substituted, and an unavailable recorded
+workspace produces an error instead of falling back to an older workspace.
+
 Each prediction is a hidden helper thread in the same environment, titled
 *Composer prediction helper* and marked in its plugin metadata. It makes one
 prediction request. It does not continue the source conversation or submit a
