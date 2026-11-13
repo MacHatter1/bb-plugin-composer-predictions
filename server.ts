@@ -6,7 +6,7 @@ import { CACHE_MIGRATIONS, SqlitePredictionCache } from "./lib/cache";
 import { buildConversation, generationPrompt, parsePrediction, sourceKey, PREDICTION_PROMPT, WORKER_INSTRUCTIONS, type RecordedEvent } from "./lib/prediction";
 
 const WORKER_TITLE = "Composer prediction helper";
-type PredictionPermissionMode = "auto" | "accept-edits";
+type PredictionPermissionMode = "auto" | "full" | "accept-edits";
 type PredictionSource = Source & { latestSeq: number; execution: { projectId: string; environmentId: string | null; providerId: string; reasoningLevel: string; permissionMode: PredictionPermissionMode; serviceTier?: string } };
 const helperSourceSchema = z.object({ sourceThreadId: z.string().min(1), sourceSeq: z.number().int().nonnegative() });
 const missingThreadSchema = z.object({ status: z.literal(404), code: z.literal("thread_not_found") });
@@ -18,6 +18,7 @@ export default async function plugin(bb: BbPluginApi) {
   const settings = bb.settings.define({
     enabled: { type: "boolean", label: "Composer predictions", default: true, description: "Suggest a next message in an empty composer. Tab or a right swipe inserts it without sending." },
     contextCharacters: { type: "number", label: "Conversation character budget", default: 48000, experimental_schema: z.number().int().min(4000).max(120000) },
+    allowUnattendedHelpers: { type: "boolean", label: "Allow providers without approval modes", default: false, description: "Prediction helpers on providers that expose neither auto nor accept-edits (e.g. pi, which only has full) then run unattended in that provider's own mode. Helpers are instructed not to use tools; enable only if you trust the provider's own agent loop." },
   });
   let config = await settings.get();
   const database = bb.storage.database();
@@ -37,14 +38,21 @@ export default async function plugin(bb: BbPluginApi) {
   const presentingApproval = new Map<string, Promise<void>>();
   const wakeups = new Map<string, () => void>();
   type Catalog = Awaited<ReturnType<typeof bb.sdk.providers.models>>;
-  // `auto` stays unattended. Otherwise ask in the workspace mode. `full` never
-  // asks, so it is not a stand-in for a provider that cannot approve automatically.
+  // `auto` stays unattended. Otherwise ask in the workspace mode. With
+  // allowUnattendedHelpers, providers that expose neither (pi: full only)
+  // fall back to their own first mode instead of being refused — helpers are
+  // prompt-restricted to no tools, and a stray interaction still surfaces
+  // through the asksForApproval path below.
   function predictionPermissionMode(modes: readonly string[] | undefined): PredictionPermissionMode {
     if (modes?.includes("auto")) return "auto";
     if (modes?.includes("accept-edits")) return "accept-edits";
-    throw new Error("This prediction provider cannot approve automatically or ask you for approval.");
+    if (config.allowUnattendedHelpers && modes !== undefined && modes.length > 0) {
+      return modes[0] as PredictionPermissionMode;
+    }
+    throw new Error("This prediction provider cannot approve automatically or ask you for approval. Enable 'Allow providers without approval modes' in Settings → Composer predictions to run such helpers unattended.");
   }
   function usablePredictionProvider(provider: Catalog["providers"][number]): boolean {
+    if (config.allowUnattendedHelpers) return provider.available;
     return provider.available && provider.capabilities.permissionModes.some(mode => mode === "auto" || mode === "accept-edits");
   }
   function resolveModel(catalog: Catalog, preferred: ModelSelection): ModelSelection {
