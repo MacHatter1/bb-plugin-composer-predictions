@@ -6,11 +6,38 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+## 0.4.7 - 2026-11-13
+
 ### Added
 
-- Plain → (ArrowRight) in the empty message box inserts the visible suggestion,
-  like Tab. The hint now reads `Tab / →`. With modifiers, or once the draft has
-  text, → moves the caret as usual.
+- Plain **→ (ArrowRight)** accepts a visible suggestion in an empty composer,
+  alongside Tab and right swipe. Modified arrow keys and IME input retain
+  their usual behaviour. The desktop hint now reads **Tab / →**.
+
+### Changed
+
+- Typing or pasting temporarily hides a suggestion. Clearing the draft brings
+  the same suggestion back. Escape and accepting a suggestion still dismiss
+  that generation; sending moves the conversation on.
+
+### Fixed
+
+- Recover the source workspace for legacy Personal threads without an
+  environment ID, preventing HTTP 409 during prediction helper creation.
+  Resolution uses the chat's provisioning history or per-thread workspace
+  identity, supports custom Personal providers and multiple chats, and never
+  substitutes an unrelated workspace.
+
+### Thanks
+
+- Thanks to [@architawr](https://github.com/architawr) for ArrowRight acceptance
+  and regression coverage in [#10](https://github.com/MacHatter1/bb-plugin-composer-predictions/pull/10).
+- Thanks to [@brzvsk](https://github.com/brzvsk) for restoring suggestions after
+  clearing drafts and the accompanying tests in [#12](https://github.com/MacHatter1/bb-plugin-composer-predictions/pull/12).
+- Thanks to [@artwist-polyakov](https://github.com/artwist-polyakov) for the
+  Personal-thread bug report and detailed diagnosis in [#11](https://github.com/MacHatter1/bb-plugin-composer-predictions/issues/11).
+- Thanks to [@MacHatter1](https://github.com/MacHatter1) for the workspace fix,
+  review follow-up and verification in [#14](https://github.com/MacHatter1/bb-plugin-composer-predictions/pull/14).
 
 ## 0.4.6 - 2026-10-20
 

@@ -7,8 +7,9 @@ ordinary draft you can edit. Nothing is ever sent for you.
 
 - **Tab or swipe to insert.** Plain Tab, plain → or a right swipe fills the empty box
   with the suggestion and focuses it. Shift+Tab keeps its usual behaviour.
-- **Out of your way.** Typing, pasting or Escape hides the suggestion until
-  the conversation moves on. Nothing shows while the thread is running or the
+- **Out of your way.** Typing or pasting hides the suggestion; clearing the draft
+  brings it back. Escape dismisses it until the conversation moves on. Nothing
+  shows while the thread is running or the
   draft has text, mentions or attachments.
 - **Your choice of model.** By default it uses the conversation's own provider
   and model at low reasoning effort. In **Settings → Plugins → Composer
@@ -23,7 +24,7 @@ ordinary draft you can edit. Nothing is ever sent for you.
 
 ## Safety and cost
 
-Tab or a right swipe only fills an empty draft through BB's public composer
+Tab, → or a right swipe only fills an empty draft through BB's public composer
 API, and the plugin never submits a message. Each prediction is one request in a hidden helper
 thread, never in your conversation, stopped and then archived as soon as its
 answer is used or the conversation moves on. Providers that support archive

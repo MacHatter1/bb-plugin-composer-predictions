@@ -35,13 +35,13 @@ it out, every time.
 
 Composer Predictions reads the conversation after each reply and suggests the
 message you are most likely to send next, as faint text in the empty message
-box. Press **Tab**, or swipe right inside it on a touchscreen, and it becomes
+box. Press **Tab** or **→**, or swipe right inside it on a touchscreen, and it becomes
 an ordinary draft you can edit. Start typing and it gets out of the way.
 
 |  | Without Composer Predictions | With Composer Predictions |
 | --- | :---: | :---: |
 | A suggested next message after each reply | ❌ | ✅ as ghost text |
-| Insert it as an editable draft | ❌ | ✅ Tab or right swipe |
+| Insert it as an editable draft | ❌ | ✅ Tab, → or right swipe |
 | Choose which model predicts | — | ✅ the conversation's, or your own |
 | Remember suggestions across restarts | — | ✅ checked before showing |
 | Send anything on your behalf | — | ❌ never |
@@ -67,9 +67,9 @@ behaviour. The gesture inserts a draft only; it never sends.
 
 ### 👻 Out of your way
 
-Typing, pasting or **Escape** hides the suggestion, and it stays hidden until
-the conversation moves on. Nothing shows while the thread is running or the
-draft has text, mentions or attachments.
+Typing or pasting hides the suggestion while the draft has content. Clear the
+draft to bring it back. **Escape** dismisses it until the conversation moves on.
+Nothing shows while the thread is running or the draft has text, mentions or attachments.
 
 </td>
 </tr>
@@ -180,7 +180,7 @@ sequenceDiagram
         Plugin->>Helper: stop, then archive
     end
     Composer-->>You: ghost text and an acceptance hint
-    You->>Composer: Tab or right swipe
+    You->>Composer: Tab, ArrowRight or right swipe
     Composer->>Composer: fill the empty draft, never send
 ```
 
@@ -207,7 +207,7 @@ Context limits, cache rules, key handling and compatibility are covered in
 
 ## Safety and cost
 
-- ✋ **Never sends.** Tab or a right swipe fills an empty draft through BB's
+- ✋ **Never sends.** Tab, → or a right swipe fills an empty draft through BB's
   public composer API. The plugin has no call to submit a message.
 - 🧾 **Never overwrites.** A suggestion is inserted only when the box has no
   text, mentions or attachments.
@@ -265,7 +265,7 @@ bb composer-predictions dismiss <thread-id>        # hide the current suggestion
 | `ready` | A suggestion is waiting in the message box. |
 | `generating` | A helper is working on it. |
 | `abstained` | The model chose to suggest nothing. |
-| `dismissed` | Typed over, hidden, or accepted. |
+| `dismissed` | Dismissed with Escape or the CLI, or accepted. |
 | `error` | The prediction failed; `bb plugin logs composer-predictions` has the cause. |
 | `idle` | Nothing to predict yet, such as while the thread is running. |
 

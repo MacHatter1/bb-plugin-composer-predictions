@@ -163,7 +163,7 @@ generated again for the same context.
 - **Self-checking:** a malformed or mismatched record is deleted on read.
 
 A temporary failure while checking a saved result keeps the entry on disk for
-a later healthy retry, without displaying unvalidated text. Typing during the
+a later healthy retry, without displaying unvalidated text. Explicit dismissal during the
 check suppresses predictions immediately while the read-only lookup finishes,
 so the dismissal is saved against the current conversation rather than the
 saved one. A dismissal that carries the temporary generation ID from before
@@ -181,10 +181,12 @@ the editor, outside the editor document. The overlay is clamped to one line in
 the compact composer and three lines otherwise, and it hides during voice
 input.
 
-A plain **Tab** received by that editor while a suggestion is visible is
-handled. **Shift**, **Alt**, **Ctrl** or **Cmd** with Tab, a Tab the host has
-already handled, and Tab during IME composition are left alone. **Escape**,
-typing, pasting and dropping dismiss the suggestion. Acceptance calls the
+Plain **Tab** or **ArrowRight** received by that editor while a suggestion is
+visible is handled. **Shift**, **Alt**, **Ctrl** or **Cmd** with either key, a key
+the host has already handled, and either key during IME composition are left
+alone. Typing, pasting and dropping hide the suggestion until the draft is
+empty again. IME input hides it until composition ends. **Escape** and acceptance
+dismiss the generation. Acceptance calls the
 public `composer.replace` and `composer.focus` APIs, and only fills a draft
 with no text, mentions or attachments. The frontend has no call to
 `composer.submit`.
@@ -196,7 +198,7 @@ much horizontal as vertical movement. A leftward or vertical gesture, a second
 finger, touch cancellation, editing, or a different prediction cancels it.
 Only deliberate horizontal movement cancels native touch behaviour; vertical
 scrolling and pinch zoom are preserved. The overlay remains inert. Coarse
-primary pointers see a **Swipe →** hint; other pointers see **Tab**. The same
+primary pointers see a **Swipe →** hint; other pointers see **Tab / →**. The same
 acceptance path rechecks visibility and composer eligibility at release.
 
 BB has no first-class ghost-text slot yet, so placement relies on BB 0.46
