@@ -44,6 +44,16 @@ test("ghost is outside the editor; only plain Tab accepts, never submits", () =>
   assert.equal(f.press("Tab").defaultPrevented, false);
   f.cleanup();
 });
+test("plain ArrowRight accepts like Tab; modified or nonempty ArrowRight keeps moving the caret", () => {
+  const f = fixture();
+  for (const options of [{ shiftKey: true }, { altKey: true }, { metaKey: true }]) assert.equal(f.press("ArrowRight", options).defaultPrevented, false);
+  assert.equal(f.press("ArrowRight").defaultPrevented, true);
+  assert.equal(f.accepted(), 1); assert.equal(f.editor.textContent, "Show me the diff");
+  assert.equal(f.press("ArrowRight").defaultPrevented, false); assert.equal(f.accepted(), 1);
+  f.cleanup();
+  const g = fixture(); g.editor.textContent = "my own draft"; refreshGhost();
+  assert.equal(g.press("ArrowRight").defaultPrevented, false); assert.equal(g.accepted(), 0); g.cleanup();
+});
 test("typing and IME dismiss immediately; a nonempty or unavailable composer cannot accept", () => {
   for (const event of ["beforeinput", "paste", "compositionstart"]) {
     const f = fixture(); f.editor.dispatchEvent(new f.dom.window.Event(event, { bubbles: true }));

@@ -55,7 +55,7 @@ export function mountGhostDecorations(doc: Document): () => void {
     overlay.setAttribute("aria-hidden", "true");
     overlay.inert = true;
     const text = doc.createElement("span");
-    const key = doc.createElement("kbd"); key.textContent = "Tab"; key.className = "prediction-tab-hint";
+    const key = doc.createElement("kbd"); key.textContent = "Tab / →"; key.className = "prediction-tab-hint";
     const swipeHint = doc.createElement("kbd"); swipeHint.textContent = "Swipe →"; swipeHint.className = "prediction-swipe-hint";
     overlay.append(text, key, swipeHint); parent.append(overlay);
     let composing = false;
@@ -100,7 +100,8 @@ export function mountGhostDecorations(doc: Document): () => void {
     const onKey = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
       if (event.key === "Escape" && visible) { dismiss(); return; }
-      if (event.key !== "Tab" || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey || event.isComposing || event.keyCode === 229 || composing) return;
+      // The ghost only shows in an empty editor, where → has no caret to move.
+      if ((event.key !== "Tab" && event.key !== "ArrowRight") || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey || event.isComposing || event.keyCode === 229 || composing) return;
       if (!accept()) return;
       event.preventDefault(); event.stopImmediatePropagation();
     };
