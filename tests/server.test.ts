@@ -96,63 +96,124 @@ test("server completes a prediction, keeps the source untouched, and cleans up i
     assert.equal(harness.inspection.sdk.callsTo("threads.send").length, 0);
   } finally { await harness.lifecycle.dispose(); }
 });
-test("a personal thread without an environment reuses its personal workspace for catalog and helper", async () => {
-  const { bb, harness } = fixture();
-  const personalSource = { ...source, projectId: "personal-project", environmentId: null };
-  harness.sdk.stub("threads.get", async ({ threadId }) => threadId === "source" ? personalSource : worker);
-  harness.sdk.stub("projects.get", async () => ({ kind: "personal" }));
-  harness.sdk.stub("environments.list", async () => [
-    { id: "unmanaged", workspaceProvisionType: "unmanaged", status: "ready", lifecycle: { phase: "active" }, hostLifecycle: "active" },
-    { id: "destroyed", workspaceProvisionType: "personal", status: "destroyed", lifecycle: { phase: "destroyed" }, hostLifecycle: "active" },
-    { id: "personal-workspace", workspaceProvisionType: "personal", status: "ready", lifecycle: { phase: "active" }, hostLifecycle: "active" },
-  ]);
-  harness.sdk.stub("threads.spawn", async (args: { environment: unknown }) => {
-    assert.deepEqual(args.environment, { type: "reuse", environmentId: "personal-workspace" });
-    return worker;
-  });
-  try {
-    await loadPlugin(bb, harness);
-    await harness.behavior.callRpc("ensure", { threadId: "source" });
-    assert.equal((await untilSettled(harness)).status, "ready");
-    assert.equal(harness.inspection.sdk.callsTo("threads.spawn").length, 1);
-    const catalogArgs = harness.inspection.sdk.callsTo("providers.models").at(-1)![0] as { environmentId?: string };
-    assert.equal(catalogArgs.environmentId, "personal-workspace");
-  } finally { await harness.lifecycle.dispose(); }
+const personalEnvironment = (id: string, overrides: Record<string, unknown> = {}) => ({
+  id, projectId: source.projectId, environmentProviderId: "personal-workspace", environmentProviderInstanceKey: "source",
+  workspaceProvisionType: "personal", status: "ready", lifecycle: { phase: "active" }, hostLifecycle: "active", ...overrides,
 });
+function personalFixture() {
+  const host = fixture();
+  host.harness.sdk.stub("threads.get", async ({ threadId }) => threadId === "source" ? { ...source, environmentId: null } : worker);
+  host.harness.sdk.stub("projects.get", async () => ({ kind: "personal" }));
+  return host;
+}
+async function assertPersonalPrediction(harness: ReturnType<typeof fixture>["harness"], environmentId: string) {
+  await harness.behavior.callRpc("ensure", { threadId: "source" });
+  assert.equal((await untilSettled(harness)).status, "ready");
+  const spawn = harness.inspection.sdk.callsTo("threads.spawn")[0][0] as { environment: unknown };
+  assert.deepEqual(spawn.environment, { type: "reuse", environmentId });
+  const catalog = harness.inspection.sdk.callsTo("providers.models").at(-1)![0] as { environmentId?: string };
+  assert.equal(catalog.environmentId, environmentId);
+}
 
-for (const count of [0, 2]) {
-  test(`a personal thread with ${count} usable workspaces does not guess an execution environment`, async () => {
-    const { bb, harness } = fixture();
-    harness.sdk.stub("threads.get", async ({ threadId }) => threadId === "source" ? { ...source, environmentId: null } : worker);
-    harness.sdk.stub("projects.get", async () => ({ kind: "personal" }));
-    harness.sdk.stub("environments.list", async () => Array.from({ length: count }, (_, id) => ({
-      id: `personal-${id}`, workspaceProvisionType: "personal", status: "ready", lifecycle: { phase: "active" }, hostLifecycle: "active",
-    })));
+for (const providerId of ["personal-workspace", "custom-projectless"]) {
+  test(`a null-environment thread resolves its ${providerId} workspace among other Personal chats`, async () => {
+    const { bb, harness } = personalFixture();
+    harness.sdk.stub("environments.list", async () => [
+      personalEnvironment("other-chat", { environmentProviderInstanceKey: "other", hostId: "other-host" }),
+      personalEnvironment("own-workspace", { environmentProviderId: providerId, workspaceProvisionType: providerId === "personal-workspace" ? "personal" : null }),
+    ]);
+    try {
+      await loadPlugin(bb, harness);
+      await assertPersonalPrediction(harness, "own-workspace");
+    } finally { await harness.lifecycle.dispose(); }
+  });
+}
+
+for (const environments of [
+  [],
+  [personalEnvironment("unrelated", { environmentProviderInstanceKey: "other" })],
+  [personalEnvironment("first"), personalEnvironment("second")],
+  [personalEnvironment("unmanaged", { environmentProviderId: null })],
+  [personalEnvironment("other-project", { projectId: "other-project" })],
+  [personalEnvironment("destroyed", { status: "destroyed" })],
+  [personalEnvironment("retiring", { lifecycle: { phase: "retiring" } })],
+  [personalEnvironment("removed-host", { hostLifecycle: "removed" })],
+]) {
+  test(`a null-environment thread refuses unusable or unproven workspaces: ${environments.map(row => row.id).join(",") || "none"}`, async () => {
+    const { bb, harness } = personalFixture();
+    harness.sdk.stub("environments.list", async () => environments);
     try {
       await loadPlugin(bb, harness);
       await harness.behavior.callRpc("ensure", { threadId: "source" });
-      const state = await untilSettled(harness);
-      assert.equal(state.status, "error");
-      assert.ok(warned(harness, count ? "multiple personal workspaces" : "no ready personal workspace"));
+      assert.equal((await untilSettled(harness)).status, "error");
       assert.equal(harness.inspection.sdk.callsTo("threads.spawn").length, 0);
     } finally { await harness.lifecycle.dispose(); }
   });
 }
 
 test("personal workspace resolution reads past the first page", async () => {
-  const { bb, harness } = fixture();
-  harness.sdk.stub("threads.get", async ({ threadId }) => threadId === "source" ? { ...source, environmentId: null } : worker);
-  harness.sdk.stub("projects.get", async () => ({ kind: "personal" }));
+  const { bb, harness } = personalFixture();
   harness.sdk.stub("environments.list", async ({ offset }: { offset: number }) => offset === 0
-    ? Array.from({ length: 100 }, (_, id) => ({ id: `old-${id}`, workspaceProvisionType: "personal", status: "destroyed" }))
-    : [{ id: "personal-workspace", workspaceProvisionType: "personal", status: "ready", lifecycle: { phase: "active" }, hostLifecycle: "active" }]);
+    ? Array.from({ length: 100 }, (_, id) => personalEnvironment(`old-${id}`, { status: "destroyed" }))
+    : [personalEnvironment("own-workspace")]);
   try {
     await loadPlugin(bb, harness);
-    await harness.behavior.callRpc("ensure", { threadId: "source" });
-    assert.equal((await untilSettled(harness)).status, "ready");
-    const args = harness.inspection.sdk.callsTo("threads.spawn")[0][0] as { environment: unknown };
-    assert.deepEqual(args.environment, { type: "reuse", environmentId: "personal-workspace" });
+    await assertPersonalPrediction(harness, "own-workspace");
     assert.equal(harness.inspection.sdk.callsTo("environments.list").length, 2);
+  } finally { await harness.lifecycle.dispose(); }
+});
+
+for (const available of [true, false]) {
+  test(`provisioning history identifies a custom workspace with an opaque instance key (ready=${available})`, async () => {
+    const { bb, harness } = personalFixture();
+    const conversation = [
+      { seq: 2, type: "client/turn/requested", data: { input: "Fix validation" } },
+      { seq: 3, type: "item/completed", data: { item: { type: "agentMessage", text: "Validation fixed" } } },
+    ];
+    harness.sdk.stub("threads.events.list", async ({ types }: { types?: string[] }) => types?.includes("system/thread-provisioning")
+      ? [{ seq: 1, type: "system/thread-provisioning", data: { environmentId: "custom-workspace", status: "completed" } }]
+      : conversation);
+    harness.sdk.stub("environments.get", async () => personalEnvironment("custom-workspace", {
+      environmentProviderId: "custom", environmentProviderInstanceKey: "opaque", workspaceProvisionType: null,
+      status: available ? "ready" : "destroyed",
+    }));
+    // A recorded but unavailable workspace must not be replaced with another.
+    harness.sdk.stub("environments.list", async () => [personalEnvironment("replacement")]);
+    try {
+      await loadPlugin(bb, harness);
+      if (available) await assertPersonalPrediction(harness, "custom-workspace");
+      else {
+        await harness.behavior.callRpc("ensure", { threadId: "source" });
+        assert.equal((await untilSettled(harness)).status, "error");
+        assert.equal(harness.inspection.sdk.callsTo("threads.spawn").length, 0);
+      }
+      assert.equal(harness.inspection.sdk.callsTo("environments.list").length, 0);
+    } finally { await harness.lifecycle.dispose(); }
+  });
+}
+
+test("workspace history is paginated and the latest recorded environment wins", async () => {
+  const { bb, harness } = personalFixture();
+  const conversation = [
+    { seq: 2, type: "client/turn/requested", data: { input: "Fix validation" } },
+    { seq: 3, type: "item/completed", data: { item: { type: "agentMessage", text: "Validation fixed" } } },
+  ];
+  harness.sdk.stub("threads.events.list", async ({ types, beforeSeq }: { types?: string[]; beforeSeq?: string }) => {
+    if (!types?.includes("system/thread-provisioning")) return conversation;
+    if (!beforeSeq) return Array.from({ length: 100 }, (_, id) => ({ seq: 300 - id, type: "system/thread-provisioning", data: { environmentId: null } }));
+    assert.equal(beforeSeq, "201");
+    return [
+      { seq: 200, type: "system/thread-provisioning", data: { environmentId: "restored-workspace" } },
+      { seq: 100, type: "system/thread-provisioning", data: { environmentId: "old-workspace" } },
+    ];
+  });
+  harness.sdk.stub("environments.get", async ({ environmentId }: { environmentId: string }) => {
+    assert.equal(environmentId, "restored-workspace");
+    return personalEnvironment(environmentId, { environmentProviderInstanceKey: "source-2" });
+  });
+  try {
+    await loadPlugin(bb, harness);
+    await assertPersonalPrediction(harness, "restored-workspace");
   } finally { await harness.lifecycle.dispose(); }
 });
 
