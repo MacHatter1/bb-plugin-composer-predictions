@@ -123,6 +123,47 @@ export default async function plugin(bb: BbPluginApi) {
     staleHelpers(threadId);
   }
 
+  async function predictionEnvironmentId(threadId: string, projectId: string, environmentId: string | null, signal: AbortSignal): Promise<string | null> {
+    if (environmentId) return environmentId;
+    const project = await bb.sdk.projects.get({ projectId, signal });
+    if (project.kind !== "personal") return null;
+    type Environment = Awaited<ReturnType<typeof bb.sdk.environments.get>>;
+    const usable = (environment: Environment) => environment.projectId === projectId && environment.environmentProviderId !== null
+      && environment.status === "ready" && environment.lifecycle.phase === "active" && environment.hostLifecycle === "active";
+    // Provisioning events identify the source's workspace even when a custom
+    // provider uses an opaque instance key, or a restore created a new attempt.
+    const provisioned = z.object({ environmentId: z.string().min(1) });
+    let beforeSeq: string | undefined;
+    for (;;) {
+      signal.throwIfAborted();
+      const rows = await bb.sdk.threads.events.list({ threadId, order: "desc", limit: "100", types: ["system/thread-provisioning"], ...(beforeSeq ? { beforeSeq } : {}), signal });
+      for (const row of rows) {
+        const parsed = row.type === "system/thread-provisioning" ? provisioned.safeParse(row.data) : null;
+        if (!parsed?.success) continue;
+        const environment = await bb.sdk.environments.get({ environmentId: parsed.data.environmentId, signal });
+        if (!usable(environment)) throw new Error("The source thread's personal workspace is not ready for predictions.");
+        return environment.id;
+      }
+      if (rows.length < 100) break;
+      beforeSeq = String(rows[rows.length - 1].seq);
+    }
+    // Older histories may lack provisioning events. BB's initial per-thread
+    // workspace instance key is the thread id; never reuse another chat's workspace.
+    const candidates: string[] = [];
+    const limit = 100;
+    for (let offset = 0; ; offset += limit) {
+      signal.throwIfAborted();
+      const environments = await bb.sdk.environments.list({ projectId, instanceKey: threadId, limit, offset, signal });
+      for (const environment of environments) {
+        if (environment.environmentProviderInstanceKey === threadId && usable(environment)) candidates.push(environment.id);
+      }
+      if (candidates.length > 1) throw new Error("Multiple personal workspaces match the source thread. Attach the thread to its workspace before requesting predictions.");
+      if (environments.length < limit) break;
+    }
+    if (!candidates.length) throw new Error("No ready personal workspace could be identified for the source thread. Attach the thread to its workspace before requesting predictions.");
+    return candidates[0];
+  }
+
   async function source(threadId: string, signal: AbortSignal): Promise<PredictionSource | null> {
     if (!config.enabled) return null;
     const override = modelSelection;
@@ -130,10 +171,11 @@ export default async function plugin(bb: BbPluginApi) {
     if (thread.status !== "idle" || thread.visibility === "hidden" || thread.archivedAt || thread.deletedAt || thread.queuedMessageCount > 0 || thread.activeBackgroundAgentCount > 0) return null;
     const options = override ? null : await bb.sdk.threads.defaultExecutionOptions({ threadId, signal });
     if (!override && !options?.model) return null;
+    const environmentId = await predictionEnvironmentId(threadId, thread.projectId, thread.environmentId, signal);
     const providerId = override?.providerId ?? thread.providerId;
     const wantedModel = override?.model ?? options!.model;
-    const catalog = await bb.sdk.providers.models(thread.environmentId
-      ? { providerId, environmentId: thread.environmentId, signal }
+    const catalog = await bb.sdk.providers.models(environmentId
+      ? { providerId, environmentId, signal }
       : { providerId, projectId: thread.projectId, signal });
     const model = catalog.models.find(row => row.model === wantedModel || row.id === wantedModel);
     const efforts = model?.supportedReasoningEfforts.map(row => row.reasoningEffort) ?? [];
@@ -153,9 +195,9 @@ export default async function plugin(bb: BbPluginApi) {
     const latestSeq = Math.max(...events.map(event => event.seq));
     staleHelpers(threadId, latestSeq);
     const identity = { version: 1, prompt: PROMPT_KEY, execution: executionModel, contextCharacters: config.contextCharacters,
-      projectId: thread.projectId, environmentId: thread.environmentId, latestSeq };
+      projectId: thread.projectId, environmentId, latestSeq };
     return { key: sourceKey(JSON.stringify(identity), conversation), model: executionModel.model, conversation, latestSeq,
-      execution: { projectId: thread.projectId, environmentId: thread.environmentId, providerId: executionModel.providerId, reasoningLevel: executionModel.reasoningLevel, permissionMode, ...(executionModel.serviceTier ? { serviceTier: executionModel.serviceTier } : {}) } };
+      execution: { projectId: thread.projectId, environmentId, providerId: executionModel.providerId, reasoningLevel: executionModel.reasoningLevel, permissionMode, ...(executionModel.serviceTier ? { serviceTier: executionModel.serviceTier } : {}) } };
   }
   const workerReleases = new Map<string, Promise<void>>();
   // Stop before archive. BB forwards an archive to the provider only once the

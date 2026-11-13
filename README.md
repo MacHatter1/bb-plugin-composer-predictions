@@ -7,7 +7,7 @@
 ### Your next message, one gesture away.
 
 Suggests what you are likely to type next, as ghost text in an empty BB message box.<br>
-Press Tab or swipe right to make it an editable draft. Nothing is ever sent for you.
+Press Tab or → (or swipe right) to make it an editable draft. Nothing is ever sent for you.
 
 ![Licence: MIT](https://img.shields.io/badge/licence-MIT-blue)
 ![bb ≥ 0.46](https://img.shields.io/badge/bb-%E2%89%A5%200.46-c026d3)
@@ -54,7 +54,7 @@ an ordinary draft you can edit. Start typing and it gets out of the way.
 
 ### ⌨️ Tab or swipe to insert
 
-Plain **Tab** fills the empty box with the suggestion and focuses it. It is a
+Plain **Tab** or **→** fills the empty box with the suggestion and focuses it. It is a
 normal draft: edit it, send it, or delete it. **Shift+Tab** keeps its usual
 focus behaviour. On a touchscreen, swipe right inside the empty message box
 to accept the visible suggestion, including the padding around the text. While
@@ -155,7 +155,7 @@ bb plugin install path:$PWD --yes
 
 | Where | What |
 | --- | --- |
-| **The message box** in an existing thread | Ghost text with a **Tab** or **Swipe →** hint once a suggestion is ready. **Tab** or a right swipe inserts it; **Escape** hides it. New-thread composers are not covered. |
+| **The message box** in an existing thread | Ghost text with a **Tab / →** or **Swipe →** hint once a suggestion is ready. **Tab**, **→** or a right swipe inserts it; **Escape** hides it. New-thread composers are not covered. |
 | **Settings → Plugins → Composer Predictions** | The on/off switch, the conversation budget, and the **Prediction model** section. |
 
 ## How it works

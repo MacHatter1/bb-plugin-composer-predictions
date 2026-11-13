@@ -6,6 +6,12 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+### Added
+
+- Plain → (ArrowRight) in the empty message box inserts the visible suggestion,
+  like Tab. The hint now reads `Tab / →`. With modifiers, or once the draft has
+  text, → moves the caret as usual.
+
 ## 0.4.6 - 2026-10-20
 
 ### Fixed

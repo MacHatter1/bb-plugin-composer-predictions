@@ -1,11 +1,11 @@
 After an agent replies, the next thing you type is often obvious. Composer
 Predictions reads the conversation and suggests that message as faint ghost
-text in the empty message box. Press **Tab** or swipe right and it becomes an
+text in the empty message box. Press **Tab** or **→**, or swipe right, and it becomes an
 ordinary draft you can edit. Nothing is ever sent for you.
 
 ## What you get
 
-- **Tab or swipe to insert.** Plain Tab or a right swipe fills the empty box
+- **Tab or swipe to insert.** Plain Tab, plain → or a right swipe fills the empty box
   with the suggestion and focuses it. Shift+Tab keeps its usual behaviour.
 - **Out of your way.** Typing, pasting or Escape hides the suggestion until
   the conversation moves on. Nothing shows while the thread is running or the

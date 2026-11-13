@@ -1,7 +1,7 @@
 {
   "name": "bb-plugin-composer-predictions",
   "version": "0.4.6",
-  "description": "Inline next-message suggestions for BB. Press Tab or swipe right to insert an editable draft.",
+  "description": "Inline next-message suggestions for BB. Press Tab or → (or swipe right) to insert an editable draft.",
   "type": "module",
   "license": "MIT",
   "engines": {
@@ -10,7 +10,7 @@
   },
   "bb": {
     "name": "Composer Predictions",
-    "description": "Inline next-message suggestions. Press Tab or swipe right to insert an editable draft; never sends automatically.",
+    "description": "Inline next-message suggestions. Press Tab or → (or swipe right) to insert an editable draft; never sends automatically.",
     "branding": {
       "icon": "./assets/icon.svg"
     },
